@@ -3,6 +3,7 @@ dist/
 build/
 .cache/
 .env*
+!.env.example
 .venv/
 .runtime-site/
 __pycache__/
