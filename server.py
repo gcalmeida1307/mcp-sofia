@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import asyncio
 import re
 import csv
 import hashlib
@@ -16,6 +17,8 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urljoin, urldefrag
@@ -81,6 +84,13 @@ MAX_INPUT_CHARS = int(os.getenv("SOFIA_MAX_INPUT_CHARS", "12000"))
 EMBEDDINGS_ENABLED = os.getenv("SOFIA_EMBEDDINGS_ENABLED", "0") == "1"
 EMBEDDING_MODEL_NAME = os.getenv("SOFIA_EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 VECTOR_SEARCH_ENABLED = os.getenv("SOFIA_VECTOR_SEARCH_ENABLED", "0") == "1"
+LEARNING_ENABLED = os.getenv("SOFIA_CONTINUOUS_LEARNING_ENABLED", "1") == "1"
+LEARNING_INTERVAL_SECONDS = max(60, int(os.getenv("SOFIA_LEARNING_INTERVAL_SECONDS", "300")))
+AI_PROVIDER = os.getenv("SOFIA_AI_PROVIDER", "claude").casefold()
+LOCAL_AI_URL = os.getenv("SOFIA_LOCAL_AI_URL", "http://127.0.0.1:11434").rstrip("/")
+LOCAL_AI_MODEL = os.getenv("SOFIA_LOCAL_AI_MODEL", "llama3.2:3b")
+LOCAL_VISION_MODEL = os.getenv("SOFIA_LOCAL_VISION_MODEL", "qwen2.5vl:3b")
+CLAUDE_FALLBACK_ENABLED = os.getenv("SOFIA_CLAUDE_FALLBACK_ENABLED", "1") == "1"
 ALLOWED_EXTENSIONS = {
     ".txt", ".md", ".rtf", ".odt", ".doc", ".docx", ".pdf", ".html", ".htm", ".xml",
     ".json", ".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".gif", ".jpeg", ".jpg",
@@ -470,6 +480,32 @@ def cached_ai_answer(module_name: str, question: str) -> str | None:
     """Return an exact prior answer for offline-first operation."""
     if not os.getenv("DATABASE_URL"):
         return None
+
+
+def approved_learning_guidance(module_name: str) -> str:
+    """Return only human-approved examples for prompt improvement."""
+    if not os.getenv("DATABASE_URL"):
+        return ""
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.connect() as connection:
+            prompts = connection.execute(text("""SELECT prompt_text FROM ai_prompt_versions
+                WHERE module_name=:module AND status='approved' ORDER BY version_no DESC LIMIT 1"""), {"module": module_name}).scalars().all()
+            examples = connection.execute(text("""SELECT question,answer FROM ai_feedback
+                WHERE module_name=:module AND rating=1 AND approved_for_dataset
+                ORDER BY created_at DESC LIMIT 3"""), {"module": module_name}).mappings().all()
+        engine.dispose()
+        parts: list[str] = []
+        if prompts:
+            parts.append(str(prompts[0])[:6000])
+        if examples:
+            parts.append("Exemplos avaliados positivamente e aprovados:\n" + "\n\n".join(
+                f"Pergunta: {row['question']}\nResposta considerada útil: {row['answer']}" for row in examples
+            )[:9000])
+        return "\n\n".join(parts)
+    except Exception:
+        return ""
     try:
         from sqlalchemy import text
         engine = database_engine()
@@ -1760,6 +1796,15 @@ def same_site_url(candidate: str, root: str) -> bool:
     return (left.scheme, left.hostname, left.port or (443 if left.scheme == "https" else 80)) == (right.scheme, right.hostname, right.port or (443 if right.scheme == "https" else 80)) and not left.username and not left.password
 
 
+def configure_tesseract(pytesseract_module: Any) -> None:
+    configured = os.getenv("SOFIA_TESSERACT_CMD", "").strip()
+    candidates = [configured, "C:\\Program Files\\Tesseract-OCR\\tesseract.exe", "C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe"]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            pytesseract_module.pytesseract.tesseract_cmd = candidate
+            return
+
+
 def extract_text(path: Path) -> str:
     suffix = path.suffix.casefold()
     if suffix in {".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".html"}:
@@ -1782,7 +1827,17 @@ def extract_text(path: Path) -> str:
             rows.extend(", ".join("" if value is None else str(value) for value in row) for row in sheet.iter_rows(values_only=True))
         return "\n".join(rows)
     if suffix in {".gif", ".jpeg", ".jpg", ".png", ".webp", ".bmp", ".tiff"}:
-        return f"Imagem armazenada: {path.name}. OCR será habilitado na próxima etapa."
+        try:
+            from PIL import Image
+            import pytesseract  # type: ignore
+            configure_tesseract(pytesseract)
+            image = Image.open(path)
+            ocr = pytesseract.image_to_string(image, lang=os.getenv("SOFIA_OCR_LANG", "por+eng")).strip()
+            return f"Imagem: {path.name}\nTexto identificado localmente por OCR:\n{ocr}" if ocr else f"Imagem armazenada: {path.name}. Não foi identificado texto pelo OCR local."
+        except ImportError:
+            return f"Imagem armazenada: {path.name}. OCR local não está instalado."
+        except Exception as exc:
+            return f"Imagem armazenada: {path.name}. OCR local indisponível ({type(exc).__name__})."
     return f"Arquivo armazenado sem extração textual: {path.name}."
 
 
@@ -1798,6 +1853,7 @@ def extract_pages(path: Path) -> tuple[list[dict[str, Any]], str | None]:
             import pytesseract  # type: ignore
             from pdf2image import convert_from_path  # type: ignore
 
+            configure_tesseract(pytesseract)
             images = convert_from_path(str(path), first_page=1, last_page=min(len(pages), 50), dpi=160)
             for index, image in enumerate(images):
                 pages[index]["text"] = pytesseract.image_to_string(image, lang=os.getenv("SOFIA_OCR_LANG", "por+eng"))
@@ -2073,7 +2129,31 @@ async def upload_knowledge(request: Request) -> JSONResponse:
     processing_message = extraction_error or ("Não foi possível catalogar a fonte no banco." if not source_id else f"{chunks} trecho(s) indexado(s).")
     update_source_processing(source_id, final_status, processing_message, extraction_error or (None if source_id else processing_message))
     audit_event(authenticated_user(request), "knowledge_upload", request)
-    return JSONResponse({"module": module_name, "bucket": bucket, "file": path.name, "extracted_chars": len(extracted), "chunks": chunks, "tabular_rows": tabular_rows, "processing_status": final_status, "processing_error": extraction_error or (None if source_id else processing_message)})
+    return JSONResponse({"module": module_name, "bucket": bucket, "file": path.name, "extracted_chars": len(extracted), "chunks": chunks, "tabular_rows": tabular_rows, "processing_status": final_status, "processing_error": extraction_error or (None if source_id else processing_message), "can_analyze_image": extension in SOURCE_BUCKETS["imagens"]})
+
+
+@mcp.custom_route("/knowledge/vision", methods=["POST"])
+async def analyze_knowledge_image(request: Request) -> JSONResponse:
+    payload = await request.json()
+    module_name = canonical_module_name(str(payload.get("module", "")))
+    filename = safe_filename(str(payload.get("file", "")))
+    if not has_module_permission(authenticated_user(request), module_name, write=False):
+        return JSONResponse({"error": "Você não tem permissão para consultar este módulo."}, status_code=403)
+    if module_name not in active_module_names() or module_name == "core" or not filename:
+        return JSONResponse({"error": "Módulo ativo e arquivo são obrigatórios."}, status_code=400)
+    image_path = (knowledge_directory(module_name, "imagens") / filename).resolve()
+    image_root = knowledge_directory(module_name, "imagens").resolve()
+    if not image_path.is_relative_to(image_root) or not image_path.is_file() or image_path.suffix.casefold() not in SOURCE_BUCKETS["imagens"]:
+        return JSONResponse({"error": "Imagem não encontrada na biblioteca do módulo."}, status_code=404)
+    question = str(payload.get("question", ""))
+    summary = await asyncio.to_thread(interpret_image_locally, image_path, module_name, question)
+    provider = "local"
+    if not summary:
+        summary = await asyncio.to_thread(interpret_image_with_claude, image_path, module_name, question)
+        provider = "claude-fallback"
+    if not summary:
+        return JSONResponse({"error": "Não foi possível analisar a imagem. Ollama e fallback Claude não responderam.", "providers": {"local": bool(LOCAL_AI_URL), "claude_fallback": CLAUDE_FALLBACK_ENABLED}}, status_code=503)
+    return JSONResponse({"module": module_name, "file": filename, "summary": summary, "provider": provider})
 
 
 @mcp.custom_route("/knowledge/url", methods=["POST"])
@@ -2555,6 +2635,388 @@ def reindex_filesystem_sources(modules: list[str], uploaded_by: str | None = Non
     return indexed, rows
 
 
+# ── Continuous learning orchestration ─────────────────────────────────────
+
+_learning_lock = threading.Lock()
+_learning_state: dict[str, Any] = {
+    "status": "idle", "last_started_at": None, "last_finished_at": None,
+    "last_result": {}, "last_error": None,
+}
+
+
+def learning_audit(module_name: str, action: str, entity_type: str, entity_id: str | None = None,
+                   details: dict[str, Any] | None = None, actor_id: str | None = None) -> None:
+    if not os.getenv("DATABASE_URL"):
+        return
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.begin() as connection:
+            connection.execute(text("""INSERT INTO ai_learning_audit
+                (module_name,action,entity_type,entity_id,details_json,actor_id)
+                VALUES(:module,:action,:entity,:entity_id,CAST(:details AS jsonb),
+                        CASE WHEN CAST(:actor AS text) IS NULL OR CAST(:actor AS text)='' THEN NULL ELSE CAST(:actor AS uuid) END)"""), {
+                "module": module_name, "action": action[:120], "entity": entity_type[:80],
+                "entity_id": entity_id, "details": json.dumps(details or {}, ensure_ascii=False), "actor": actor_id,
+            })
+        engine.dispose()
+    except Exception:
+        return
+
+
+def learning_job(module_name: str, job_type: str, status: str = "queued", payload: dict[str, Any] | None = None,
+                 requested_by: str | None = None) -> str | None:
+    if not os.getenv("DATABASE_URL"):
+        return None
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.begin() as connection:
+            job_id = connection.execute(text("""INSERT INTO ai_learning_jobs
+                (module_name,job_type,status,payload_json,requested_by)
+                VALUES(:module,:job_type,:status,CAST(:payload AS jsonb),
+                        CASE WHEN CAST(:requester AS text) IS NULL OR CAST(:requester AS text)='' THEN NULL ELSE CAST(:requester AS uuid) END)
+                RETURNING id::text"""), {
+                "module": module_name, "job_type": job_type, "status": status,
+                "payload": json.dumps(payload or {}, ensure_ascii=False), "requester": requested_by,
+            }).scalar()
+        engine.dispose()
+        return str(job_id) if job_id else None
+    except Exception:
+        return None
+
+
+def finish_learning_job(job_id: str | None, status: str, result: dict[str, Any] | None = None,
+                        error_message: str | None = None) -> None:
+    if not job_id or not os.getenv("DATABASE_URL"):
+        return
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.begin() as connection:
+            connection.execute(text("""UPDATE ai_learning_jobs
+                SET status=:status,result_json=CAST(:result AS jsonb),error_message=:error,
+                    finished_at=now()
+                WHERE id=CAST(:id AS uuid)"""), {
+                "id": job_id, "status": status, "result": json.dumps(result or {}, ensure_ascii=False),
+                "error": error_message,
+            })
+        engine.dispose()
+    except Exception:
+        return
+
+
+def start_learning_job(job_id: str | None) -> None:
+    if not job_id or not os.getenv("DATABASE_URL"):
+        return
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.begin() as connection:
+            connection.execute(text("""UPDATE ai_learning_jobs
+                SET status='running',attempts=attempts+1,started_at=now()
+                WHERE id=CAST(:id AS uuid)"""), {"id": job_id})
+        engine.dispose()
+    except Exception:
+        return
+
+
+def persist_external_table(module_name: str, source_key: str, table_name: str, columns: list[str],
+                           rows: list[dict[str, Any]], connection_label: str) -> int:
+    """Persist a bounded, read-only snapshot of an external table.
+
+    SQLAlchemy reflection supplies identifiers; no table name is interpolated
+    into SQL. Values are stored as JSON and are isolated by module/source key.
+    """
+    summary = {
+        "connection": connection_label, "table": table_name, "columns": columns,
+        "rows_sampled": len(rows), "read_only_snapshot": True,
+    }
+    text_lines = [json.dumps(summary, ensure_ascii=False)]
+    text_lines.extend(json.dumps(row, ensure_ascii=False, default=str) for row in rows[:1000])
+    payload = "\n".join(text_lines)
+    source_id = record_source(
+        module_name=module_name, bucket="bases_de_dados", filename=f"{connection_label}__{table_name}.json",
+        storage_path=Path(f"database://{connection_label}/{table_name}"), mime_type="application/json",
+        sha256=hashlib.sha256(payload.encode("utf-8")).hexdigest(), extracted_text=payload,
+        schema=summary, source_key=source_key, processing_status="PROCESSANDO",
+    )
+    pages = [{"page_no": None, "section_name": table_name, "text": payload}]
+    chunks = persist_source_chunks(source_id, pages)
+    if source_id and os.getenv("DATABASE_URL"):
+        try:
+            from sqlalchemy import text
+            engine = database_engine()
+            with engine.begin() as db:
+                db.execute(text("DELETE FROM knowledge_records WHERE source_id=CAST(:id AS uuid)"), {"id": source_id})
+                for row_no, row in enumerate(rows[:1000], start=1):
+                    db.execute(text("""INSERT INTO knowledge_records(source_id,row_no,data_json)
+                        VALUES(CAST(:id AS uuid),:row_no,CAST(:data AS jsonb))"""), {
+                        "id": source_id, "row_no": row_no, "data": json.dumps(row, ensure_ascii=False, default=str),
+                    })
+            engine.dispose()
+        except Exception:
+            pass
+    update_source_processing(source_id, "INDEXADO" if chunks else "PARCIALMENTE_INDEXADO",
+                             f"Snapshot somente leitura: {len(rows)} registro(s) amostrado(s).")
+    return chunks
+
+
+def refresh_indexed_links(modules: list[str]) -> dict[str, Any]:
+    """Refresh a bounded set of permitted links without crawling blindly."""
+    result: dict[str, Any] = {"checked": 0, "updated": 0, "blocked": 0, "errors": []}
+    if not os.getenv("DATABASE_URL"):
+        return result
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.connect() as connection:
+            sources = connection.execute(text("""SELECT id::text,module_name,source_url,storage_path
+                FROM knowledge_sources
+                WHERE module_name = ANY(:modules) AND source_url IS NOT NULL AND is_current AND deleted_at IS NULL
+                  AND (last_processed_at IS NULL OR last_processed_at < now() - make_interval(secs => :seconds))
+                ORDER BY last_processed_at NULLS FIRST LIMIT :limit"""), {
+                "modules": modules, "seconds": int(os.getenv("SOFIA_LINK_REFRESH_INTERVAL_SECONDS", "900")),
+                "limit": max(1, min(50, MAX_CRAWL_PAGES)),
+            }).mappings().all()
+        engine.dispose()
+    except Exception:
+        return result
+    for row in sources:
+        result["checked"] += 1
+        source_id = str(row["id"])
+        url = str(row["source_url"])
+        try:
+            if not safe_remote_url(url) or not robots_allowed(url):
+                result["blocked"] += 1
+                update_source_processing(source_id, "BLOQUEADO", "Link não atualizado pela política de rede ou robots.txt.")
+                continue
+            request_obj = urllib.request.Request(url, headers={"User-Agent": "SofiaKnowledgeBot/1.0"})
+            with urllib.request.build_opener(SafeRedirectHandler).open(request_obj, timeout=15) as response:
+                content_type = str(response.headers.get("Content-Type", "text/html"))
+                raw = response.read(MAX_URL_BYTES + 1)
+            if len(raw) > MAX_URL_BYTES:
+                raise ValueError("limite de conteúdo excedido")
+            extracted, pages, extraction_error = remote_content_to_text(raw, content_type, url)
+            path = Path(str(row["storage_path"])).resolve()
+            if path.parent.exists() and path.is_relative_to(KNOWLEDGE_BASE_PATH):
+                atomic_write(path, extracted.encode("utf-8"))
+            with database_engine().begin() as connection:
+                connection.execute(text("""UPDATE knowledge_sources SET content=:content,extracted_text=:extracted,
+                    mime_type=:mime,size_bytes=:size_bytes,sha256=:sha256,last_processed_at=now(),processing_error=:error
+                    WHERE id=CAST(:id AS uuid)"""), {
+                    "id": source_id, "content": raw if len(raw) <= DB_INLINE_CONTENT_MAX_BYTES else None,
+                    "extracted": extracted, "mime": content_type[:160], "size_bytes": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(), "error": extraction_error,
+                })
+            chunks = persist_source_chunks(source_id, pages)
+            update_source_processing(source_id, "PARCIALMENTE_INDEXADO" if extraction_error else ("INDEXADO" if chunks else "ERRO"), extraction_error or f"Atualizado automaticamente: {chunks} trecho(s).", extraction_error)
+            result["updated"] += 1
+        except Exception as exc:
+            result["errors"].append(f"{row['module_name']}: {type(exc).__name__}")
+            update_source_processing(source_id, "ERRO", "Não foi possível atualizar o link automaticamente.", type(exc).__name__)
+    return result
+
+
+def sync_external_databases(modules: list[str]) -> dict[str, Any]:
+    """Synchronize configured SQL sources using bounded read-only snapshots."""
+    result: dict[str, Any] = {"connections": 0, "tables": 0, "rows": 0, "errors": []}
+    if not os.getenv("DATABASE_URL"):
+        return result
+    try:
+        from sqlalchemy import create_engine, inspect, select, Table, MetaData, text
+        engine = database_engine()
+        with engine.connect() as db:
+            connections = db.execute(text("""SELECT id::text,module_name,name,config_ciphertext
+                FROM external_connections WHERE source_type='database'
+                  AND module_name = ANY(:modules)"""), {"modules": modules}).mappings().all()
+        engine.dispose()
+    except Exception:
+        return result
+    for item in connections:
+        module_name = str(item["module_name"])
+        try:
+            config = json.loads(decrypt_totp_secret(bytes(item["config_ciphertext"])))
+            connection_url = str(config.get("connection_url", ""))
+            if not connection_url:
+                continue
+            source_engine = create_engine(connection_url, pool_pre_ping=True, connect_args={"connect_timeout": 10} if connection_url.startswith(("postgres", "mysql")) else {})
+            inspector = inspect(source_engine)
+            table_names = inspector.get_table_names()[:50]
+            result["connections"] += 1
+            for table_name in table_names:
+                try:
+                    metadata = MetaData()
+                    table = Table(table_name, metadata, autoload_with=source_engine)
+                    with source_engine.connect() as source_connection:
+                        values = source_connection.execute(select(table).limit(1000)).mappings().all()
+                    rows = [{str(key): value for key, value in dict(row).items()} for row in values]
+                    columns = [str(column.name) for column in table.columns]
+                    result["rows"] += len(rows)
+                    result["tables"] += 1
+                    persist_external_table(module_name, f"db:{item['id']}:{table_name}", table_name, columns, rows, str(item["name"]))
+                except Exception as exc:
+                    result["errors"].append(f"{module_name}/{table_name}: {type(exc).__name__}")
+            with database_engine().begin() as db:
+                db.execute(text("""UPDATE external_connections SET status='disponivel',last_synced_at=now(),
+                    discovery_json=CAST(:discovery AS jsonb),updated_at=now() WHERE id=CAST(:id AS uuid)"""), {
+                    "id": item["id"], "discovery": json.dumps({"tables": table_names, "sample_limit": 1000}, ensure_ascii=False),
+                })
+            source_engine.dispose()
+        except Exception as exc:
+            result["errors"].append(f"{module_name}/{item['name']}: {type(exc).__name__}")
+    return result
+
+
+def run_learning_cycle(modules: list[str] | None = None, actor_id: str | None = None) -> dict[str, Any]:
+    """Run the complete offline-first cycle without modifying model weights."""
+    selected = [name for name in (modules or active_module_names()) if name != "core" and name in active_module_names()]
+    if not selected:
+        return {"modules": [], "files": 0, "rows": 0, "database": {}, "graphs": 0}
+    with _learning_lock:
+        _learning_state.update({"status": "running", "last_started_at": time.time(), "last_error": None})
+        result: dict[str, Any] = {"modules": selected, "files": 0, "rows": 0, "database": {}, "graphs": 0}
+        try:
+            file_job = learning_job("core", "filesystem_scan", requested_by=actor_id)
+            start_learning_job(file_job)
+            files, rows = reindex_filesystem_sources(selected, actor_id)
+            result.update({"files": files, "rows": rows})
+            finish_learning_job(file_job, "succeeded", {"files": files, "rows": rows})
+            result["links"] = refresh_indexed_links(selected)
+            db_result = sync_external_databases(selected)
+            result["database"] = db_result
+            for module_name in selected:
+                graph_job = learning_job(module_name, "semantic_graph", requested_by=actor_id)
+                start_learning_job(graph_job)
+                graph = {"available": False}
+                if os.getenv("DATABASE_URL"):
+                    graph_engine = database_engine()
+                    try:
+                        with graph_engine.connect() as graph_connection:
+                            graph = build_semantic_graph(graph_connection, module_name, persist=False)
+                        if graph.get("available"):
+                            persist_semantic_graph(graph_engine, graph)
+                            result["graphs"] += 1
+                    finally:
+                        graph_engine.dispose()
+                finish_learning_job(graph_job, "succeeded", {"available": bool(graph.get("available"))})
+                learning_audit(module_name, "cycle_completed", "module", details={"files": files, "rows": rows}, actor_id=actor_id)
+            _learning_state.update({"status": "idle", "last_finished_at": time.time(), "last_result": result})
+            return result
+        except Exception as exc:
+            _learning_state.update({"status": "error", "last_error": type(exc).__name__, "last_finished_at": time.time()})
+            learning_audit("core", "cycle_failed", "learning_cycle", details={"error": type(exc).__name__}, actor_id=actor_id)
+            raise
+
+
+def learning_worker() -> None:
+    while not getattr(learning_worker, "stop", False):
+        if LEARNING_ENABLED:
+            try:
+                run_learning_cycle()
+            except Exception as exc:
+                print(f"continuous learning cycle failed: {type(exc).__name__}", flush=True)
+        time.sleep(LEARNING_INTERVAL_SECONDS)
+
+
+@mcp.custom_route("/ai/learning/status", methods=["GET"])
+async def ai_learning_status(request: Request) -> JSONResponse:
+    requester = authenticated_user(request)
+    if not requester:
+        return JSONResponse({"error": "Autenticação necessária."}, status_code=401)
+    module_name = canonical_module_name(str(request.query_params.get("module", "")))
+    if module_name and module_name != "core" and not has_module_permission(requester, module_name):
+        return JSONResponse({"error": "Módulo inválido ou sem permissão."}, status_code=403)
+    result: dict[str, Any] = {"enabled": LEARNING_ENABLED, "interval_seconds": LEARNING_INTERVAL_SECONDS, "state": dict(_learning_state)}
+    if os.getenv("DATABASE_URL"):
+        try:
+            from sqlalchemy import text
+            engine = database_engine()
+            with engine.connect() as connection:
+                params: dict[str, Any] = {"module": module_name}
+                condition = "WHERE (:module='' OR module_name=:module)"
+                jobs = connection.execute(text(f"""SELECT id::text,module_name,job_type,status,result_json,error_message,started_at,finished_at,created_at
+                    FROM ai_learning_jobs {condition} ORDER BY created_at DESC LIMIT 30"""), params).mappings().all()
+                audits = connection.execute(text(f"""SELECT module_name,action,entity_type,created_at
+                    FROM ai_learning_audit {condition} ORDER BY created_at DESC LIMIT 20"""), params).mappings().all()
+            engine.dispose()
+            result.update({"jobs": [dict(row) for row in jobs], "audit": [dict(row) for row in audits]})
+        except Exception:
+            result.update({"jobs": [], "audit": []})
+    return JSONResponse(result)
+
+
+@mcp.custom_route("/ai/learning/run", methods=["POST"])
+async def ai_learning_run(request: Request) -> JSONResponse:
+    requester = authenticated_user(request)
+    if not requester or not is_global_user(requester):
+        return JSONResponse({"error": "A execução do ciclo exige o usuário Global."}, status_code=403)
+    try:
+        payload = await request.json()
+        requested = canonical_module_name(str(payload.get("module", "")))
+        modules = [requested] if requested and requested != "core" else None
+        if requested and requested not in active_module_names():
+            return JSONResponse({"error": "Módulo inválido."}, status_code=400)
+        result = await asyncio.to_thread(run_learning_cycle, modules, requester)
+        return JSONResponse({"status": "completed", **result})
+    except Exception:
+        return JSONResponse({"error": "O ciclo de aprendizado não foi concluído."}, status_code=500)
+
+
+@mcp.custom_route("/ai/learning/datasets/prepare", methods=["POST"])
+async def prepare_learning_dataset(request: Request) -> JSONResponse:
+    requester = authenticated_user(request)
+    if not requester or not is_global_user(requester):
+        return JSONResponse({"error": "Somente o usuário Global pode preparar datasets."}, status_code=403)
+    try:
+        from sqlalchemy import text
+        payload = await request.json()
+        module_name = canonical_module_name(str(payload.get("module", "")))
+        if module_name not in active_module_names() or module_name == "core":
+            return JSONResponse({"error": "Módulo inválido."}, status_code=400)
+        engine = database_engine()
+        with engine.begin() as connection:
+            rows = connection.execute(text("""SELECT id::text,question,answer FROM ai_feedback
+                WHERE module_name=:module AND rating=1 AND NOT approved_for_dataset
+                ORDER BY created_at LIMIT 500"""), {"module": module_name}).mappings().all()
+            body = "\n".join(f"Q: {row['question']}\nA: {row['answer']}" for row in rows)
+            digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            version = connection.execute(text("""SELECT COALESCE(MAX(version_no),0)+1 FROM ai_dataset_versions
+                WHERE module_name=:module"""), {"module": module_name}).scalar_one()
+            dataset_id = connection.execute(text("""INSERT INTO ai_dataset_versions
+                (module_name,version_no,source_feedback_count,content_sha256,status)
+                VALUES(:module,:version,:count,:digest,'draft') RETURNING id::text"""), {
+                "module": module_name, "version": int(version), "count": len(rows), "digest": digest,
+            }).scalar_one()
+        engine.dispose()
+        learning_audit(module_name, "dataset_prepared", "dataset", str(dataset_id), {"feedback_count": len(rows), "sha256": digest}, requester)
+        return JSONResponse({"status": "draft", "dataset_id": str(dataset_id), "version_no": int(version), "feedback_count": len(rows), "requires_approval": True}, status_code=201)
+    except Exception:
+        return JSONResponse({"error": "Não foi possível preparar o dataset."}, status_code=400)
+
+
+@mcp.custom_route("/ai/learning/datasets/{dataset_id}/approve", methods=["POST"])
+async def approve_learning_dataset(request: Request) -> JSONResponse:
+    requester = authenticated_user(request)
+    if not requester or not is_global_user(requester):
+        return JSONResponse({"error": "Somente o usuário Global pode aprovar datasets."}, status_code=403)
+    dataset_id = str(request.path_params["dataset_id"])
+    try:
+        from sqlalchemy import text
+        engine = database_engine()
+        with engine.begin() as connection:
+            module_name = connection.execute(text("SELECT module_name FROM ai_dataset_versions WHERE id=CAST(:id AS uuid) AND status='draft'"), {"id": dataset_id}).scalar()
+            if not module_name:
+                return JSONResponse({"error": "Dataset inexistente ou já processado."}, status_code=404)
+            connection.execute(text("UPDATE ai_dataset_versions SET status='approved',approved_by=CAST(:user AS uuid) WHERE id=CAST(:id AS uuid)"), {"id": dataset_id, "user": requester})
+            connection.execute(text("UPDATE ai_feedback SET approved_for_dataset=true WHERE module_name=:module AND rating=1 AND NOT approved_for_dataset"), {"module": module_name})
+        engine.dispose()
+        learning_audit(str(module_name), "dataset_approved", "dataset", dataset_id, {}, requester)
+        return JSONResponse({"status": "approved", "dataset_id": dataset_id})
+    except Exception:
+        return JSONResponse({"error": "Não foi possível aprovar o dataset."}, status_code=400)
+
+
 @mcp.custom_route("/knowledge/database/test", methods=["POST"])
 @mcp.custom_route("/data-sources/test", methods=["POST"])
 async def test_database(request: Request) -> JSONResponse:
@@ -2863,13 +3325,98 @@ async def n8n_run(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Não foi possível executar a automação."}, status_code=502)
 
 
-def ask_claude(module_name: str, question: str, conversation_context: str = "") -> str:
+def ask_local_model(system_prompt: str, question: str, images: list[str] | None = None, model: str | None = None, timeout: int = 120) -> str | None:
+    """Ask an optional Ollama-compatible model without sending data externally."""
+    if AI_PROVIDER not in {"local", "ollama", "auto"}:
+        return None
+    try:
+        message: dict[str, Any] = {"role": "user", "content": question}
+        if images:
+            message["images"] = images
+        request_obj = urllib.request.Request(
+            f"{LOCAL_AI_URL}/api/chat",
+            data=json.dumps({
+                "model": model or LOCAL_AI_MODEL, "stream": False,
+                "messages": [{"role": "system", "content": system_prompt}, message],
+                "options": {"temperature": 0.2},
+            }, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(request_obj, timeout=timeout) as response:  # nosec B310 -- local provider URL is configured explicitly
+            payload = json.loads(response.read(8 * 1024 * 1024).decode("utf-8", errors="replace"))
+        content = payload.get("message", {}).get("content") if isinstance(payload, dict) else None
+        return str(content).strip() if content else None
+    except Exception:
+        return None
+
+
+def interpret_image_locally(path: Path, module_name: str, question: str = "") -> str | None:
+    """Interpreta imagem somente com modelo visual local, quando instalado."""
+    try:
+        raw_image = path.read_bytes()
+        try:
+            from PIL import Image
+
+            image = Image.open(BytesIO(raw_image))
+            image.thumbnail((1600, 1600))
+            buffer = BytesIO()
+            image.convert("RGB").save(buffer, format="JPEG", quality=82, optimize=True)
+            raw_image = buffer.getvalue()
+        except Exception:
+            pass
+        encoded = base64.b64encode(raw_image).decode("ascii")
+        system = (
+            "Você é o assistente visual local da SOFIA. Descreva somente o que é observável, "
+            "separe observação de hipótese e não invente detalhes. Para imagens médicas, "
+            "não faça diagnóstico: informe que a conclusão depende de radiologista e contexto "
+            "clínico e recomende avaliação profissional quando houver possível urgência. "
+            f"O módulo autorizado é {module_name}. Responda em português claro."
+        )
+        prompt = question.strip() or "Descreva tecnicamente a imagem e informe as limitações da análise automática."
+        evidence = module_knowledge(module_name, prompt)
+        if evidence and "NENHUMA_FONTE_RECUPERADA" not in evidence:
+            system += "\n\nEvidência textual recuperada exclusivamente deste módulo:\n" + evidence[:8000]
+        return ask_local_model(system, prompt, images=[encoded], model=LOCAL_VISION_MODEL, timeout=45)
+    except Exception:
+        return None
+
+
+def interpret_image_with_claude(path: Path, module_name: str, question: str = "") -> str | None:
+    """Fallback visual explícito; só executa quando o fallback Claude estiver habilitado."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return "A chave ANTHROPIC_API_KEY ainda não foi configurada."
-    client = Anthropic(api_key=api_key)
+    if not CLAUDE_FALLBACK_ENABLED or not api_key:
+        return None
+    try:
+        raw_image = path.read_bytes()
+        media_type = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}.get(path.suffix.casefold(), "image/png")
+        prompt = question.strip() or "Descreva tecnicamente esta imagem e informe as limitações da análise automática."
+        system = (
+            f"Você é o módulo {module_info(module_name)['title']} da SOFIA. Responda em português. "
+            "Use a imagem apenas como evidência. Em imagens médicas, não dê diagnóstico definitivo, "
+            "diferencie observação de hipótese e recomende avaliação profissional quando apropriado."
+        )
+        client = Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=os.getenv("CLAUDE_MODEL", "claude-sonnet-5"), max_tokens=1200, system=system,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(raw_image).decode("ascii")}},
+                {"type": "text", "text": prompt},
+            ]}],
+        )
+        answer = "\n".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+        return answer.strip() or None
+    except Exception:
+        return None
+
+
+def ai_provider_status() -> dict[str, Any]:
+    return {"provider": AI_PROVIDER, "local_model": LOCAL_AI_MODEL, "local_url": LOCAL_AI_URL, "claude_fallback": CLAUDE_FALLBACK_ENABLED}
+
+
+def ask_claude(module_name: str, question: str, conversation_context: str = "") -> str:
     module = module_info(module_name)
     evidence = module_knowledge(module_name, question)
+    approved_guidance = approved_learning_guidance(module_name)
     system = (
         f"Você é o módulo {module['title']} do sistema Sofia. {module['description']}\n"
         "Responda somente dentro do escopo deste módulo. Não invente dados. "
@@ -2882,11 +3429,26 @@ def ask_claude(module_name: str, question: str, conversation_context: str = "") 
     )
     if module_name == "gestao-empresarial":
         system += "\n\nPolítica institucional para adoção de IA:\n" + GESTAO_IA_GUIDANCE
+    if approved_guidance:
+        system += (
+            "\n\nAprendizado validado deste módulo (use como orientação de estilo e recuperação; "
+            "não trate exemplos como fatos novos):\n" + approved_guidance
+        )
     if conversation_context.strip():
         system += (
             "\n\nContexto recente da conversa no mesmo módulo (use apenas para entender referências como "
             "'esse', 'isso' ou 'o anterior'; não o trate como fonte factual):\n" + conversation_context[:12000]
         )
+    local_answer = ask_local_model(system, question)
+    if local_answer:
+        log_ai_query(module_name, question, local_answer, evidence, source_mode="local")
+        return local_answer
+    if AI_PROVIDER in {"local", "ollama"} and not CLAUDE_FALLBACK_ENABLED:
+        return "O modelo local está selecionado, mas o serviço local não respondeu. Inicie o Ollama com o modelo configurado ou habilite explicitamente o fallback Claude."
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return "A chave ANTHROPIC_API_KEY ainda não foi configurada e o modelo local não respondeu."
+    client = Anthropic(api_key=api_key)
     response = client.messages.create(
         model=os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
         max_tokens=int(os.getenv("SOFIA_MAX_RESPONSE_TOKENS", "2400")),
@@ -2956,6 +3518,9 @@ if __name__ == "__main__":
     for configured_module in active_module_names():
         if configured_module != "core":
             ensure_module_structure(configured_module)
+    if LEARNING_ENABLED:
+        worker = threading.Thread(target=learning_worker, name="sofia-continuous-learning", daemon=True)
+        worker.start()
     app = mcp.streamable_http_app(host="127.0.0.1")
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(SessionGateMiddleware)

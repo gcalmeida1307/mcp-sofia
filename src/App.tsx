@@ -230,8 +230,9 @@ function StatusBadge({ status }: { status: Module["status"] }) {
 
 // ── Chat view ─────────────────────────────────────────────────────────────
 
-function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; onManageSources: () => void }) {
+function ChatView({ activeModule, onManageSources, userName }: { activeModule: ModuleId; onManageSources: () => void; userName: string }) {
   const cfg = moduleConfig(activeModule);
+  const chatName = userName.trim().split(/\s+/)[0] || "Você";
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "0",
@@ -243,6 +244,9 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const [feedback, setFeedback] = useState<Record<string, number>>({});
+  const [attachmentStatus, setAttachmentStatus] = useState("");
+  const [attachedFile, setAttachedFile] = useState<{ name: string; module: string; canAnalyze: boolean; analyzing?: boolean } | null>(null);
+  const attachmentRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -258,12 +262,25 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
     setTyping(true);
     try {
       const routedModule = activeModule === "infra" ? "infraestrutura" : activeModule;
+      const questionWithAttachment = attachedFile ? `${text}\n\n[Anexo ativo: ${attachedFile.name}]` : text;
+      if (attachedFile?.canAnalyze) {
+        setAttachedFile((current) => current ? { ...current, analyzing: true } : current);
+        setAttachmentStatus("Imagem anexada. A análise visual local pode levar alguns instantes...");
+        const response = await fetch("/knowledge/vision", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module: attachedFile.module, file: attachedFile.name, question: text }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "O modelo visual local não respondeu.");
+        setMessages((m) => [...m, { id: (Date.now() + 1).toString(), role: "sofia", content: `[Análise visual local — ${attachedFile.name}]\n\n${data.summary}`, ts: new Date() }]);
+        setAttachmentStatus(`Análise concluída para ${attachedFile.name}.`);
+        setAttachedFile((current) => current ? { ...current, analyzing: false } : current);
+        setTyping(false);
+        return;
+      }
       const conversationContext = [...messages, userMsg]
         .filter((message) => message.id !== "0")
         .slice(-8)
         .map((message) => `${message.role === "user" ? "Usuário" : "Sofia"}: ${message.content}`)
         .join("\n\n");
-      const content = await sofiaMcp.callTool("perguntar_sofia", { pergunta: text, modulo: routedModule, contexto: conversationContext });
+      const content = await sofiaMcp.callTool("perguntar_sofia", { pergunta: questionWithAttachment, modulo: routedModule, contexto: conversationContext });
       setMessages((m) => [
         ...m,
         { id: (Date.now() + 1).toString(), role: "sofia", content, ts: new Date() },
@@ -281,6 +298,44 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
       ]);
     } finally {
       setTyping(false);
+      setAttachedFile((current) => current ? { ...current, analyzing: false } : current);
+    }
+  }
+
+  async function uploadAttachment(file: File) {
+    setAttachedFile({ name: file.name, module: activeModule === "infra" ? "infraestrutura" : activeModule, canAnalyze: false });
+    setAttachmentStatus(`Enviando ${file.name}...`);
+    const form = new FormData();
+    form.append("module", activeModule === "infra" ? "infraestrutura" : activeModule);
+    form.append("file", file);
+    try {
+      const response = await fetch("/knowledge/upload", { method: "POST", credentials: "include", body: form });
+      const data = await response.json();
+      if (!response.ok) { setAttachmentStatus(`Falha: ${data.error ?? "não foi possível indexar o anexo."}`); return; }
+      const bucket = data.bucket === "imagens" ? "imagens" : data.bucket === "bases_de_dados" ? "bases de dados" : "textos/documentos";
+      setAttachedFile({ name: data.file, module: form.get("module") as string, canAnalyze: Boolean(data.can_analyze_image) });
+      setAttachmentStatus(`${file.name} foi anexado ao módulo ${form.get("module")}.\nSalvo em: ${bucket}.\nStatus: ${data.processing_status ?? "INDEXADO"}.`);
+    } catch (error) {
+      setAttachmentStatus(`Falha de comunicação: ${error instanceof Error ? error.message : "backend indisponível"}`);
+    } finally {
+      if (attachmentRef.current) attachmentRef.current.value = "";
+    }
+  }
+
+  async function analyzeAttachedImage() {
+    if (!attachedFile?.canAnalyze || attachedFile.analyzing) return;
+    setAttachedFile((current) => current ? { ...current, analyzing: true } : current);
+    setAttachmentStatus("Imagem anexada. A análise visual local pode levar alguns instantes...");
+    try {
+      const response = await fetch("/knowledge/vision", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module: attachedFile.module, file: attachedFile.name }) });
+      const data = await response.json();
+      if (!response.ok) { setAttachmentStatus(`Falha na análise: ${data.error ?? "modelo visual indisponível"}`); return; }
+      setMessages((current) => [...current, { id: (Date.now() + 1).toString(), role: "sofia", content: `[Análise visual local — ${attachedFile.name}]\n\n${data.summary}`, ts: new Date() }]);
+      setAttachmentStatus(`Análise concluída para ${attachedFile.name}.`);
+    } catch (error) {
+      setAttachmentStatus(`Falha de comunicação: ${error instanceof Error ? error.message : "backend indisponível"}`);
+    } finally {
+      setAttachedFile((current) => current ? { ...current, analyzing: false } : current);
     }
   }
 
@@ -340,7 +395,7 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
               className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold text-white"
               style={{ backgroundColor: msg.role === "sofia" ? accent : "#6b7280" }}
             >
-              {msg.role === "sofia" ? "S" : "U"}
+              {msg.role === "sofia" ? "S" : chatName.slice(0, 2).toUpperCase()}
             </div>
             <div
               className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -350,7 +405,7 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
               }`}
               style={msg.role === "user" ? { backgroundColor: accent } : {}}
             >
-              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+              <div className="mb-1 text-[10px] font-semibold opacity-70">{msg.role === "sofia" ? "Sofia" : chatName}</div><div className="whitespace-pre-wrap break-words">{msg.content}</div>
               {msg.role === "sofia" && msg.id !== "0" && <div className="mt-2 flex gap-2 text-[10px] text-[var(--muted-foreground)]"><button onClick={() => void rate(msg, 1)} className={feedback[msg.id] === 1 ? "text-emerald-600" : ""}>Útil</button><button onClick={() => void rate(msg, -1)} className={feedback[msg.id] === -1 ? "text-rose-600" : ""}>Precisa melhorar</button></div>}
             </div>
           </div>
@@ -380,6 +435,10 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
       {/* Input */}
       <div className="px-6 py-4 border-t border-[var(--border)]">
         <div className="flex gap-3 items-end bg-[var(--card)] border border-[var(--border)] rounded-xl px-4 py-3 focus-within:ring-2 transition-shadow" style={{ "--tw-ring-color": accent } as React.CSSProperties}>
+          <label className="mb-1 flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]" title="Adicionar arquivo à biblioteca deste módulo" aria-label="Adicionar arquivo">
+            <span aria-hidden="true" className="text-base">📎</span>
+            <input ref={attachmentRef} type="file" disabled={activeModule === "core"} className="hidden" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt,.csv,.tsv,.xlsx,.xls,.parquet,.json,.xml,.html,.htm,.gif,.jpeg,.jpg,.png,.webp,.bmp,.tif,.tiff" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file); }} />
+          </label>
           <textarea
             rows={3}
             value={input}
@@ -398,6 +457,11 @@ function ChatView({ activeModule, onManageSources }: { activeModule: ModuleId; o
             <IconSend />
           </button>
         </div>
+        {attachedFile && <div className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--foreground)]">
+          <span aria-hidden="true">📎</span><span className="min-w-0 flex-1 truncate">{attachedFile.name}</span>
+          {attachedFile.canAnalyze && <button type="button" onClick={() => void analyzeAttachedImage()} disabled={attachedFile.analyzing} className="rounded-md border border-[var(--border)] px-2 py-1 hover:bg-[var(--card)] disabled:opacity-50">{attachedFile.analyzing ? "Analisando..." : "Analisar imagem"}</button>}
+        </div>}
+        {attachmentStatus && <p role="status" className="mt-2 whitespace-pre-wrap text-xs text-[var(--muted-foreground)]">{attachmentStatus}</p>}
         <p className="text-xs text-[var(--muted-foreground)] mt-2 text-center">
           Sofia pode cometer erros. Verifique informações críticas.
         </p>
@@ -778,6 +842,10 @@ function NavItem({
       {children}
     </button>
   );
+}
+
+function NavGlyph({ symbol }: { symbol: string }) {
+  return <span aria-hidden="true" className="nav-glyph">{symbol}</span>;
 }
 
 function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boolean; theme: Theme; onThemeChange: (theme: Theme) => void; onAuthenticated: (mustChange: boolean) => void }) {
@@ -1205,11 +1273,11 @@ export default function App() {
           <IconModules />
           Módulos
         </NavItem>
-        <NavItem active={view === "knowledge"} onClick={() => { setView("knowledge"); setSidebarOpen(false); }} accent={accent}>Biblioteca de conhecimento</NavItem>
-        <NavItem active={view === "connections"} onClick={() => { setView("connections"); setSidebarOpen(false); }} accent={accent}>Fontes de dados</NavItem>
-        <NavItem active={view === "dashboards"} onClick={() => { setView("dashboards"); setSidebarOpen(false); }} accent={accent}>Dashboards</NavItem>
-        <NavItem active={view === "automations"} onClick={() => { setView("automations"); setSidebarOpen(false); }} accent={accent}>Fluxos e automações</NavItem>
-        {userRole === "global" && <NavItem active={view === "users"} onClick={() => { setView("users"); setSidebarOpen(false); }} accent={accent}>Usuários e aprovações</NavItem>}
+        <NavItem active={view === "knowledge"} onClick={() => { setView("knowledge"); setSidebarOpen(false); }} accent={accent}><NavGlyph symbol="☆" />Base de conhecimento</NavItem>
+        <NavItem active={view === "connections"} onClick={() => { setView("connections"); setSidebarOpen(false); }} accent={accent}><NavGlyph symbol="⌁" />Fontes de dados</NavItem>
+        <NavItem active={view === "dashboards"} onClick={() => { setView("dashboards"); setSidebarOpen(false); }} accent={accent}><NavGlyph symbol="▥" />Dashboards</NavItem>
+        <NavItem active={view === "automations"} onClick={() => { setView("automations"); setSidebarOpen(false); }} accent={accent}><NavGlyph symbol="ϟ" />Automações</NavItem>
+        {userRole === "global" && <NavItem active={view === "users"} onClick={() => { setView("users"); setSidebarOpen(false); }} accent={accent}><NavGlyph symbol="♙" />Usuários</NavItem>}
       </div>
 
       {/* Module profiles */}
@@ -1303,7 +1371,7 @@ export default function App() {
 
         {/* View content */}
         <div className="app-content flex-1 overflow-hidden">
-          {view === "chat" && <ChatView activeModule={activeModule} onManageSources={() => setView("modules")} key={activeModule} />}
+          {view === "chat" && <ChatView activeModule={activeModule} userName={userName} onManageSources={() => setView("modules")} key={activeModule} />}
           {view === "modules" && (
             <ModulesView
               modules={modules}

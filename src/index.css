@@ -214,6 +214,18 @@ textarea { overflow-x: hidden; overflow-wrap: anywhere; }
 .app-sidebar button:not(.profile-picker__select):hover {
   background: var(--sidebar-hover);
 }
+.app-sidebar .nav-glyph {
+  display: inline-grid;
+  width: 1.1rem;
+  place-items: center;
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: 1rem;
+  line-height: 1;
+  opacity: .8;
+}
+.app-sidebar button:hover .nav-glyph,
+.app-sidebar button[style] .nav-glyph { opacity: 1; }
 .app-sidebar .profile-picker__hint { color: var(--sidebar-fg); opacity: .7; }
 .app-main { background: var(--background); }
 .app-topbar {
@@ -244,6 +256,7 @@ textarea { overflow-x: hidden; overflow-wrap: anywhere; }
 .app-content input::placeholder,
 .app-content textarea::placeholder { color: var(--muted-foreground) !important; }
 .app-content h1, .app-content h2, .app-content h3 { letter-spacing: -.015em; }
+.app-content h1, .app-content h2 { font-family: var(--font-heading); }
 .app-content button { transition: background-color .18s ease, border-color .18s ease, transform .18s ease; }
 .app-content button:active { transform: translateY(1px); }
 
