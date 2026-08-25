@@ -1,0 +1,250 @@
+{
+  "generated_at_utc": "2026-08-22T13:15:19.1118945Z",
+  "project": "sofia-mcp",
+  "repository": "não identificado nesta pasta; histórico Git não disponível",
+  "files": [
+    {
+      "path": ".mcp.json",
+      "bytes": 245,
+      "sha256": "799e5e904d69f792d7a9b19560e82606fa97a9dd450ae4c9077019aedeab23d1"
+    },
+    {
+      "path": ".mise.toml",
+      "bytes": 43,
+      "sha256": "6d2834ef5f78a7dc4c384570a62b895137fdf63df171d237f0747932bd001435"
+    },
+    {
+      "path": "AGENTS.md",
+      "bytes": 2321,
+      "sha256": "b39f6ead09e39e9f6eb5a132342519fb7bf9c77ab14522f0da38edf9224c6b77"
+    },
+    {
+      "path": "CLAUDE.md",
+      "bytes": 11,
+      "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49"
+    },
+    {
+      "path": "docs/AUDIT-EXECUTION-2026-08-22.md",
+      "bytes": 7126,
+      "sha256": "bdbf64644a2716678f9a8edacc73612fec5e7b3edf44149b382ebf2fa8959900"
+    },
+    {
+      "path": "docs/IMPLEMENTATION-STATUS.md",
+      "bytes": 6835,
+      "sha256": "51b27e27ec0651cb0bd458272f9c430c4da41774128098a3f5a0b69d62c4ea7f"
+    },
+    {
+      "path": "docs/module-seed-links.json",
+      "bytes": 2062,
+      "sha256": "54c573cea779661ba2dcd02deedcd295454a308185ac070427f3b9d6c2e1a8a4"
+    },
+    {
+      "path": "index.html",
+      "bytes": 440,
+      "sha256": "768eac67e6271681de61c23f1c94a6bf688607bbad2d0bccafd8f4bfe789a079"
+    },
+    {
+      "path": "migrations/001_security.sql",
+      "bytes": 3702,
+      "sha256": "73f3ad8fa314c9fe6c39313c2184535958e5a304cfb3e0254b2642f794adb50a"
+    },
+    {
+      "path": "migrations/002_access_knowledge_platform.sql",
+      "bytes": 3508,
+      "sha256": "3be98f49a45e8a8c50a077f2f5b80a36d30251256ff42da72bca0cb17a2bde99"
+    },
+    {
+      "path": "migrations/003_knowledge_pipeline.sql",
+      "bytes": 2572,
+      "sha256": "6211d47a249ee4c2ab89ee3f6685b4126503d481156ea3c1008ddb01e8c2ebec"
+    },
+    {
+      "path": "migrations/004_source_storage.sql",
+      "bytes": 562,
+      "sha256": "9ceb272d7254764159e26e18663b636856f132ac34e5da9426182b683f9791ce"
+    },
+    {
+      "path": "migrations/005_ai_memory_trends.sql",
+      "bytes": 1434,
+      "sha256": "864531cdcfa7baea87e7b240aa59c4a88a70189acd5f0fccfe31a5c6390967fd"
+    },
+    {
+      "path": "migrations/006_knowledge_semantic_pipeline.sql",
+      "bytes": 1141,
+      "sha256": "bd5dab86682aac51969994301a8283c1f76ae8a96b29c96994944b1fca7e1373"
+    },
+    {
+      "path": "migrations/007_campus_modules.sql",
+      "bytes": 1364,
+      "sha256": "d3429c67b0d346ff8a34f28dd619f437803696786efe0c40d085d9a7be888f74"
+    },
+    {
+      "path": "migrations/008_module_visuals_identifiers.sql",
+      "bytes": 2139,
+      "sha256": "6a38973283339d620130e3b547cfc49b5a8ad5c12386f760f8b8930e199d69ff"
+    },
+    {
+      "path": "migrations/009_governance_and_dataset.sql",
+      "bytes": 2025,
+      "sha256": "f6fcc88e280577eff653423701910250950e9bfe6cac56a2a7d04d0862808b69"
+    },
+    {
+      "path": "migrations/010_gestao_empresarial.sql",
+      "bytes": 576,
+      "sha256": "26e05f705eba4f8ce0f6924c5363822845bb18e2ccfc303b6a71fd8d5bb1d2d3"
+    },
+    {
+      "path": "package.json",
+      "bytes": 600,
+      "sha256": "39ea2166ceb065d5b27ad143e7a274773ecfdbfe226ea01c5c142992f5ad7593"
+    },
+    {
+      "path": "POSTGRES-LOCAL.md",
+      "bytes": 954,
+      "sha256": "19d1dfd97fa7ae093bc3ebd95966cb157ffb13c570e90bdfd20df18792a7df7e"
+    },
+    {
+      "path": "pyproject.toml",
+      "bytes": 771,
+      "sha256": "2ab1350d7da360b1e9eedfddd238a47e7b7a94e3c46b0d179ef165681fafc369"
+    },
+    {
+      "path": "README.md",
+      "bytes": 961,
+      "sha256": "9662ec3767c2786922550e7283457a25126fbc28665365a36cc01ce878a9ba60"
+    },
+    {
+      "path": "scripts/audit-project.ps1",
+      "bytes": 2858,
+      "sha256": "022099145ad8862134587a9ce110eca03cf6c0ad164bf761a9d86913336dbd45"
+    },
+    {
+      "path": "scripts/backup-postgres-local.ps1",
+      "bytes": 1131,
+      "sha256": "020bc8e9750ed04bcba85b7087466b86355ba1bb04f1e9ec27ee5846b9f10d0c"
+    },
+    {
+      "path": "scripts/check-infra-links.py",
+      "bytes": 3188,
+      "sha256": "c8f77b63911e0c7ae898eec736cf6bed031997f7eba6ae7ffa3384da6805f11f"
+    },
+    {
+      "path": "scripts/restart-local.ps1",
+      "bytes": 1239,
+      "sha256": "62cfd1b5c363a771bfde8cc0669a2268ad6a94ba45d5f23529c7d992eda33e50"
+    },
+    {
+      "path": "scripts/restore-postgres-local.ps1",
+      "bytes": 936,
+      "sha256": "c720e377522680f0e7897e04dec25707897c6f96fa7dda69e4da6a59ff546bc0"
+    },
+    {
+      "path": "scripts/seed-module-links.py",
+      "bytes": 2011,
+      "sha256": "3bef2689df4d5db1de83c6a226e5d3cbde2f89add0e001a72950f98404c31039"
+    },
+    {
+      "path": "scripts/setup-postgres-local.ps1",
+      "bytes": 4340,
+      "sha256": "4a1e64fe82358272599ce927524f32ad14c7a99b2608e11b14dbaa51137f66c3"
+    },
+    {
+      "path": "scripts/validate-local.ps1",
+      "bytes": 345,
+      "sha256": "b55d9766d5c689b631aba2107a9352614503a0e874fe66e434d9e5bfd26d3b45"
+    },
+    {
+      "path": "security.py",
+      "bytes": 3842,
+      "sha256": "f77512de738aefb00e65ff4131f55e2f790a14873d94fab554ff14db171cc7c1"
+    },
+    {
+      "path": "server.py",
+      "bytes": 144388,
+      "sha256": "ed33716be72de804df2287184f0e5788a761a3d7a6a850e0913c49ba33c76c38"
+    },
+    {
+      "path": "smoke_test.py",
+      "bytes": 1196,
+      "sha256": "7000ac20ab20700247cbe3ec162e91b4df6399ee9719c948e32369db557e00a8"
+    },
+    {
+      "path": "src/App.tsx",
+      "bytes": 107203,
+      "sha256": "9fd58e8ddf5bc73a663bd4bee929ef537cb44cff47822dd4f08ec7e2e8e15c85"
+    },
+    {
+      "path": "src/index.css",
+      "bytes": 6069,
+      "sha256": "5af69ad207780c7e013d129da83b19ad344fcdc54c85c89278b9848535f3e8f6"
+    },
+    {
+      "path": "src/main.tsx",
+      "bytes": 232,
+      "sha256": "5f49dce6e6cc4b5d678cf529ef892af0ab7dfa6afb300b11ad559224019b8b05"
+    },
+    {
+      "path": "src/mcpClient.ts",
+      "bytes": 2824,
+      "sha256": "a72168a6c33dec82ca15be087a12963a0ec218b2533160941ccc84281de920f5"
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "bytes": 38,
+      "sha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5"
+    },
+    {
+      "path": "tests/knowledge-validation-prompts.json",
+      "bytes": 1274,
+      "sha256": "30eaec008ffa1ff5ae6d72f544c7dfe89305b5949dc95fa7714b1a213a3b369c"
+    },
+    {
+      "path": "tests/test_connector_safety.py",
+      "bytes": 1896,
+      "sha256": "334164b95c4949d518fbb49537f047b7f0801155ddacc9ec5b1de19ea8d0deac"
+    },
+    {
+      "path": "tests/test_knowledge_architecture.py",
+      "bytes": 2779,
+      "sha256": "42b3ec324d8223e6741ed1f8bcec6b77748ab90cd3579fde98af7101350ac131"
+    },
+    {
+      "path": "tests/test_security_primitives.py",
+      "bytes": 1172,
+      "sha256": "12e532a2f5dd72ba54003b65ed15e6a308c1d7bcdb8644015e9bf6b9d5dad10e"
+    },
+    {
+      "path": "tests/test_tabular_ingestion.py",
+      "bytes": 1514,
+      "sha256": "611b20db9a9e477dfa490274ccc2d8a5d4069cb599ea189bd0c184ccd70ea043"
+    },
+    {
+      "path": "tsconfig.json",
+      "bytes": 536,
+      "sha256": "10c74095a125a7a715d878d34a4e76e3cde5acfcefbbbe6c46afffc25dab01ac"
+    },
+    {
+      "path": "vite.config.ts",
+      "bytes": 12526,
+      "sha256": "4d4a575873478067bcf7f6a07b9b88f43f8ed3591a3dd010dbb657ba590fb440"
+    }
+  ],
+  "exclusions": [
+    "node_modules",
+    ".venv",
+    "dist",
+    "knowledge",
+    "__pycache__",
+    ".pytest_cache",
+    ".git",
+    ".runtime-site",
+    ".figma",
+    "logs",
+    "docs/audit/manifest.json",
+    "docs/audit/manifest.sha256",
+    "docs\\audit\\manifest.json",
+    "docs\\audit\\manifest.sha256",
+    ".env*"
+  ],
+  "note": "Manifesto não inclui segredos, dados de conhecimento, dependências ou artefatos de build."
+}

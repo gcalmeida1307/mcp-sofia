@@ -1,0 +1,10 @@
+{
+  "description": "A modern platform offering AI-powered modules for core management, IT, medical records, and inventory with customizable themes and interactive chat.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

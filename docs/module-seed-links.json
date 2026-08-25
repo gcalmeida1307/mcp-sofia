@@ -1,0 +1,48 @@
+{
+  "observacao": "Catálogo inicial de fontes públicas. Os links são apenas sugestões; a ingestão é manual, autenticada e respeita robots.txt.",
+  "modules": {
+    "infraestrutura": [
+      {"title": "Documentação Zabbix", "url": "https://www.zabbix.com/documentation/current/pt/manual"},
+      {"title": "Documentação Python", "url": "https://docs.python.org/3/"}
+    ],
+    "medicina": [
+      {"title": "Biblioteca Virtual em Saúde", "url": "https://bvsalud.org/"},
+      {"title": "Ministério da Saúde", "url": "https://www.gov.br/saude/pt-br"}
+    ],
+    "almoxarifado": [
+      {"title": "Portal de Compras do Governo Federal", "url": "https://www.gov.br/compras/pt-br"}
+    ],
+    "recursos-humanos": [
+      {"title": "Ministério do Trabalho e Emprego", "url": "https://www.gov.br/trabalho-e-emprego/pt-br"}
+    ],
+    "contabilidade": [
+      {"title": "Conselho Federal de Contabilidade", "url": "https://cfc.org.br/"}
+    ],
+    "financeiro": [
+      {"title": "Tesouro Transparente", "url": "https://www.tesourotransparente.gov.br/"}
+    ],
+    "juridico-trabalhista": [
+      {"title": "CLT no Planalto", "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm"},
+      {"title": "Tribunal Superior do Trabalho", "url": "https://www.tst.jus.br/"}
+    ],
+    "secretaria": [
+      {"title": "Ministério da Educação", "url": "https://www.gov.br/mec/pt-br"}
+    ],
+    "cursos": [
+      {"title": "Catálogo Nacional de Cursos Técnicos", "url": "https://www.gov.br/mec/pt-br/assuntos/educacao-profissional-e-tecnologica"}
+    ],
+    "biblioteca": [
+      {"title": "IBICT", "url": "https://www.gov.br/ibict/pt-br"}
+    ],
+    "pesquisa-extensao": [
+      {"title": "CNPq", "url": "https://www.gov.br/cnpq/pt-br"}
+    ],
+    "compras": [
+      {"title": "Compras.gov.br", "url": "https://www.gov.br/compras/pt-br"}
+    ],
+    "gestao-empresarial": [
+      {"title": "Empresas e Negócios", "url": "https://www.gov.br/empresas-e-negocios/pt-br"},
+      {"title": "Sebrae", "url": "https://www.sebrae.com.br/"}
+    ]
+  }
+}

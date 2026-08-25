@@ -1,0 +1,56 @@
+{
+  "gestao-empresarial": {
+    "indicador": ["kpi", "métrica", "métricas", "indicador de desempenho", "okr"],
+    "processo": ["fluxo de trabalho", "workflow", "rotina", "procedimento", "processo operacional"],
+    "custo": ["despesa", "gasto", "orçamento", "redução de custos", "custo total"],
+    "eficiência": ["produtividade", "rendimento", "performance", "otimização", "melhoria contínua"],
+    "inovação": ["transformação digital", "mudança", "experimentação", "inovatividade", "foresight"],
+    "modelo 6d": ["seis dimensões", "diagnóstico estratégico", "gestão universitária", "transformação institucional"],
+    "liderança": ["gestão de pessoas", "governança", "tomada de decisão", "liderança estratégica", "cultura organizacional"],
+    "risco": ["ameaça", "vulnerabilidade", "impacto", "mitigação", "continuidade"],
+    "dashboard": ["painel", "bi", "business intelligence", "visualização de dados", "relatório gerencial"]
+  },
+  "infraestrutura": {
+    "rede": ["network", "tcp/ip", "lan", "wan", "switch", "roteador", "vlan", "dns", "dhcp"],
+    "servidor": ["host", "máquina", "datacenter", "virtualização", "hypervisor", "linux", "windows server"],
+    "zabbix": ["monitoramento", "item", "trigger", "template", "host", "proativo", "métrica de disponibilidade"],
+    "segurança": ["cibersegurança", "firewall", "vulnerability", "hardening", "iam", "controle de acesso", "lgpd"],
+    "automação": ["script", "powershell", "bash", "python", "rpa", "agendamento", "pipeline"],
+    "sistema operacional": ["so", "kernel", "processo", "serviço", "driver", "permissão", "log"],
+    "banco de dados": ["sql", "postgresql", "mysql", "sql server", "oracle", "sqlite", "backup", "replicação"]
+  },
+  "juridico-trabalhista": {
+    "vínculo de emprego": ["relação de emprego", "pessoalidade", "subordinação", "onerosidade", "não eventualidade"],
+    "jornada": ["horário de trabalho", "controle de ponto", "intervalo", "descanso", "banco de horas"],
+    "hora extra": ["sobrejornada", "horas suplementares", "adicional de horas extras", "jornada extraordinária"],
+    "férias": ["período aquisitivo", "período concessivo", "abono pecuniário", "férias vencidas", "férias proporcionais"],
+    "afastamento": ["auxílio por incapacidade", "benefício previdenciário", "licença", "inss", "atestado médico"],
+    "desvio de função": ["acúmulo de função", "equiparação salarial", "alteração contratual", "atividade diversa"],
+    "rescisão": ["término do contrato", "dispensa", "justa causa", "aviso prévio", "verbas rescisórias"],
+    "recurso": ["recurso ordinário", "recurso de revista", "agravo", "prazo processual", "processo do trabalho"],
+    "direito tributário": ["tributo", "imposto", "taxa", "contribuição", "anterioridade", "crédito tributário", "obrigação tributária"],
+    "direito constitucional": ["constituição", "direitos fundamentais", "controle de constitucionalidade", "princípio constitucional", "federalismo"],
+    "direito civil": ["contrato civil", "responsabilidade civil", "obrigação", "indenização", "prescrição", "decadência"],
+    "direito administrativo": ["ato administrativo", "licitação", "contrato administrativo", "servidor público", "poder de polícia", "improbidade"],
+    "contrato": ["cláusula", "contratante", "contratado", "inadimplemento", "rescisão contratual", "multa contratual"],
+    "lgpd": ["proteção de dados", "dado pessoal", "dado sensível", "controlador", "operador", "encarregado", "anonimização"],
+    "jurisprudência": ["precedente", "súmula", "acórdão", "tribunal", "entendimento judicial", "decisão"],
+    "concurso público": ["edital", "prova objetiva", "questão discursiva", "gabarito", "revisão", "simulado"]
+  },
+  "medicina": {
+    "coriza": ["rinorreia", "secreção nasal", "nariz escorrendo", "rinite", "resfriado comum"],
+    "sono": ["privação de sono", "insônia", "sonolência", "microssono", "higiene do sono"],
+    "febre": ["temperatura elevada", "hipertermia", "pirexia", "estado febril"],
+    "dor": ["algia", "dor aguda", "dor crônica", "sintoma doloroso", "escala de dor"],
+    "diagnóstico": ["avaliação clínica", "anamnese", "exame físico", "diagnóstico diferencial", "sinais e sintomas"],
+    "medicamento": ["fármaco", "remédio", "princípio ativo", "dose", "posologia", "efeito adverso"],
+    "prontuário": ["registro clínico", "histórico do paciente", "evolução", "prescrição", "dados de saúde"]
+  },
+  "contabilidade": {
+    "tributo": ["imposto", "taxa", "contribuição", "obrigação tributária", "carga tributária"],
+    "balanço": ["demonstração contábil", "ativo", "passivo", "patrimônio líquido", "balanço patrimonial"],
+    "receita": ["faturamento", "ingresso", "venda", "receita operacional", "receita bruta"],
+    "despesa": ["custo", "gasto", "encargo", "desembolso", "despesa operacional"],
+    "conciliação": ["conciliação bancária", "lançamento", "partida dobrada", "fechamento", "saldo"]
+  }
+}

@@ -1,0 +1,190 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-heading);
+  --font-mono: var(--font-code);
+}
+
+:root {
+  --font-heading: 'DM Sans', sans-serif;
+  --font-body: 'Outfit', sans-serif;
+  --font-code: 'JetBrains Mono', monospace;
+
+  --background: #f8f7fc;
+  --foreground: #1a1625;
+  --card: #ffffff;
+  --card-foreground: #1a1625;
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --secondary: #ede9fe;
+  --secondary-foreground: #5b21b6;
+  --muted: #f1effe;
+  --muted-foreground: #7c6fad;
+  --accent: #a78bfa;
+  --accent-foreground: #1a1625;
+  --border: #e0d9f7;
+  --ring: #8b5cf6;
+  --radius: 10px;
+
+  --sidebar-bg: #ffffff;
+  --sidebar-fg: #4b5563;
+  --sidebar-hover: #f1effe;
+  --sidebar-border: #e5e7eb;
+  --sidebar-active: #8b5cf6;
+}
+
+.dark {
+  --background: #0d0b14;
+  --foreground: #ede9fe;
+  --card: #1a1625;
+  --card-foreground: #ede9fe;
+  --primary: #a78bfa;
+  --primary-foreground: #0d0b14;
+  --secondary: #2d1f5e;
+  --secondary-foreground: #c4b8f0;
+  --muted: #1e1835;
+  --muted-foreground: #9080c8;
+  --accent: #7c3aed;
+  --accent-foreground: #ede9fe;
+  --border: #2d2450;
+  --ring: #a78bfa;
+
+  --sidebar-bg: #080610;
+  --sidebar-fg: #c4b8f0;
+  --sidebar-hover: #1e1835;
+  --sidebar-border: rgba(255,255,255,.08);
+  --sidebar-active: #a78bfa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--background);
+  color: var(--foreground);
+  transition: background-color 0.3s, color 0.3s;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+*:hover::-webkit-scrollbar-thumb { opacity: 1; }
+
+.profile-picker {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-width: 0;
+  padding: .55rem;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: .75rem;
+  background: rgba(255,255,255,.06);
+}
+.profile-picker__icon { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; flex: 0 0 auto; border-radius: .5rem; color: #fff; font-size: .75rem; font-weight: 700; }
+.profile-picker__select { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #fff; font: 600 .75rem var(--font-body); cursor: pointer; }
+.profile-picker__select option { background: var(--sidebar-bg); color: #fff; }
+.profile-picker__hint { margin: .55rem .25rem 0; color: rgba(255,255,255,.38); font: .65rem/1.35 var(--font-body); }
+.app-sidebar .sidebar-border { border-color: var(--sidebar-border); }
+.app-sidebar .sidebar-logo-name { color: var(--foreground); }
+.app-sidebar .sidebar-logo-sub,
+.app-sidebar .sidebar-section-label { color: var(--sidebar-fg); opacity: .6; }
+.app-sidebar .profile-picker__select { color: var(--foreground); }
+.app-sidebar .profile-picker__select option { background: var(--sidebar-bg); color: var(--foreground); }
+.app-sidebar .profile-picker__hint { color: var(--sidebar-fg); opacity: .65; }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 45%, transparent); outline-offset: 2px; }
+input, select, textarea { max-width: 100%; }
+textarea { overflow-x: hidden; overflow-wrap: anywhere; }
+
+@media (max-width: 767px) {
+  .profile-picker { padding: .45rem; }
+  .profile-picker__hint { display: none; }
+  .profile-picker__select { font-size: .7rem; }
+  .grid-cols-2 { grid-template-columns: minmax(0, 1fr) !important; }
+  .max-w-\[82\%\] { max-width: 92%; }
+  .px-6 { padding-left: 1rem; padding-right: 1rem; }
+  .p-6 { padding: 1rem; }
+  .text-xl { font-size: 1.15rem; }
+}
+@media (min-width: 768px) and (max-height: 760px) { .profile-picker__hint { display: none; } }
+@keyframes sofia-module-roll {
+  0%, 22% { transform: translateX(0); }
+  25%, 47% { transform: translateX(-25%); }
+  50%, 72% { transform: translateX(-50%); }
+  75%, 97% { transform: translateX(-75%); }
+  100% { transform: translateX(0); }
+}
+
+.sofia-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: #fff;
+  font-weight: 800;
+  font-style: italic;
+  line-height: 1;
+  transform: skew(-8deg) rotate(-8deg);
+  border-radius: 12px;
+  background: linear-gradient(160deg, #2e7d32 0%, #2e7d32 47%, #8b5cf6 48%, #6f42c1 100%);
+  box-shadow: 0 8px 18px rgb(111 66 193 / 0.24);
+}
+
+.sofia-mark--sm { width: 36px; height: 36px; font-size: 17px; }
+.sofia-mark--md { width: 44px; height: 44px; margin-bottom: 20px; font-size: 20px; }
+
+.auth-surface input,
+.auth-surface textarea,
+.auth-surface select {
+  color: var(--foreground);
+}
+
+.auth-surface input::placeholder,
+.auth-surface textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+
+.sofia-module-roll {
+  animation: sofia-module-roll 20s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sofia-module-roll { animation: none; }
+}

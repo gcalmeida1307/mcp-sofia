@@ -1,0 +1,33 @@
+[project]
+name = "sofia-mcp"
+version = "0.1.0"
+description = "MCP modular com Core Sofia e módulos de conhecimento isolados"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic>=0.60.0",
+  "mcp[cli]>=1.12.0",
+  "pydantic-settings>=2.5.0",
+  "python-dotenv>=1.0.1",
+  "python-multipart>=0.0.20",
+  "pypdf>=5.0.0",
+  "pytesseract>=0.3.13",
+  "pdf2image>=1.17.0",
+  "python-docx>=1.1.0",
+  "openpyxl>=3.1.0",
+  "sqlalchemy>=2.0.0",
+  "pymysql>=1.1.0",
+  "oracledb>=2.0.0",
+  "pyodbc>=5.0.0; sys_platform == 'win32'",
+  "psycopg[binary]>=3.2.0",
+  "argon2-cffi>=23.1.0",
+  "pyotp>=2.9.0",
+  "cryptography>=43.0.0",
+  "qrcode[pil]>=8.0.0",
+  "pgvector>=0.5.0"
+]
+
+[project.optional-dependencies]
+semantic = ["sentence-transformers>=6.0.0"]
+
+[tool.ruff]
+line-length = 100
