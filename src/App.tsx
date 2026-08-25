@@ -1174,7 +1174,7 @@ export default function App() {
 
   const sidebar = (
     <aside
-      className="app-sidebar flex flex-col h-full w-64 flex-shrink-0"
+      className="app-sidebar flex flex-col h-full w-[222px] flex-shrink-0"
       style={{ backgroundColor: "var(--sidebar-bg)" }}
     >
       {/* Logo */}
@@ -1264,7 +1264,7 @@ export default function App() {
       )}
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="app-main flex-1 flex flex-col min-w-0">
         {/* Mobile topbar */}
         <div className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--background)]">
           <button
@@ -1291,7 +1291,7 @@ export default function App() {
 
         {/* Active module banner */}
         <div
-          className="hidden md:flex items-center gap-3 px-6 py-2.5 text-xs font-medium text-white"
+          className="app-topbar hidden md:flex items-center gap-3 px-6 py-2.5 text-xs font-medium text-white"
           style={{ backgroundColor: accent }}
         >
           <span className="font-mono opacity-75">perfil ativo:</span>
@@ -1302,7 +1302,7 @@ export default function App() {
         </div>
 
         {/* View content */}
-        <div className="flex-1 overflow-hidden">
+        <div className="app-content flex-1 overflow-hidden">
           {view === "chat" && <ChatView activeModule={activeModule} onManageSources={() => setView("modules")} key={activeModule} />}
           {view === "modules" && (
             <ModulesView

@@ -188,3 +188,70 @@ textarea { overflow-x: hidden; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
   .sofia-module-roll { animation: none; }
 }
+
+/* Sofia professional workspace theme */
+.app-sidebar {
+  width: 222px !important;
+  min-width: 222px;
+  background: var(--sidebar-bg) !important;
+  border-right: 1px solid var(--sidebar-border);
+  color: var(--sidebar-fg);
+}
+.app-sidebar .sidebar-border { border-color: var(--sidebar-border) !important; }
+.app-sidebar .sidebar-logo-name { color: var(--foreground); letter-spacing: .04em; }
+.app-sidebar .sidebar-logo-sub { color: var(--sidebar-fg); letter-spacing: .14em; opacity: .7; }
+.app-sidebar .sidebar-section-label { color: var(--sidebar-fg); letter-spacing: .18em; opacity: .7; }
+.app-sidebar .profile-picker {
+  border-color: var(--sidebar-border);
+  background: var(--sidebar-hover);
+  border-radius: 9px;
+}
+.app-sidebar button {
+  min-height: 34px;
+  border-radius: 7px;
+  letter-spacing: .01em;
+}
+.app-sidebar button:not(.profile-picker__select):hover {
+  background: var(--sidebar-hover);
+}
+.app-sidebar .profile-picker__hint { color: var(--sidebar-fg); opacity: .7; }
+.app-main { background: var(--background); }
+.app-topbar {
+  min-height: 38px;
+  border-bottom: 1px solid var(--sidebar-border);
+  background: color-mix(in srgb, var(--module-accent, var(--primary)) 82%, var(--background));
+  letter-spacing: .02em;
+}
+.app-content { background: var(--background); }
+.app-content > * { color: var(--foreground); }
+.app-content [class*="bg-[var(--card)]"] {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,.08);
+}
+.app-content [class*="bg-[var(--muted)]"] {
+  background: var(--muted) !important;
+}
+.app-content input,
+.app-content select,
+.app-content textarea {
+  background: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+  border-radius: 8px !important;
+}
+.app-content input::placeholder,
+.app-content textarea::placeholder { color: var(--muted-foreground) !important; }
+.app-content h1, .app-content h2, .app-content h3 { letter-spacing: -.015em; }
+.app-content button { transition: background-color .18s ease, border-color .18s ease, transform .18s ease; }
+.app-content button:active { transform: translateY(1px); }
+
+@media (max-width: 767px) {
+  .app-sidebar { width: min(86vw, 300px) !important; min-width: 0; }
+  .app-content { overflow-y: auto; }
+}
+
+.dark .app-content [class*="bg-[var(--card)]"] {
+  box-shadow: 0 12px 32px rgba(0,0,0,.2);
+}
