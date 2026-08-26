@@ -23,16 +23,24 @@ def test_standard_module_folders_are_declared():
     assert "processados" in MODULE_FOLDERS
 
 
-def test_local_reindex_uses_configured_knowledge_root():
+def test_local_reindex_uses_configured_knowledge_root(tmp_path, monkeypatch):
+    knowledge_root = tmp_path / "knowledge"
+    (knowledge_root / "gestao-empresarial").mkdir(parents=True)
+    monkeypatch.setattr("server.KNOWLEDGE_BASE_PATH", knowledge_root)
     roots = knowledge_scan_roots("gestao-empresarial")
     assert roots
     assert roots[0].name == "gestao-empresarial"
     assert roots[0].parent.name == "knowledge"
 
 
-def test_gestao_6d_retrieves_the_local_study():
+def test_gestao_6d_retrieves_the_local_study(tmp_path, monkeypatch):
+    knowledge_root = tmp_path / "knowledge"
+    module_root = knowledge_root / "gestao-empresarial"
+    module_root.mkdir(parents=True)
+    (module_root / "IAGESTAOUNIVERSITARIA.txt").write_text("Modelo 6D para gestão universitária", encoding="utf-8")
+    monkeypatch.setattr("server.KNOWLEDGE_BASE_PATH", knowledge_root)
     evidence = module_knowledge("gestao-empresarial", "Me diga algo sobre o modelo 6D")
-    assert "IAGESTAOUNIVERSITARIA.docx" in evidence
+    assert "IAGESTAOUNIVERSITARIA.txt" in evidence
     assert "Modelo 6D" in evidence
 
 
@@ -73,7 +81,8 @@ def test_remote_url_rejects_private_hosts_and_control_characters():
     assert not safe_remote_url("https://example.org/arquivo com espaco.pdf")
 
 
-def test_labor_routes_cover_common_questions():
+def test_labor_routes_cover_common_questions(monkeypatch):
+    monkeypatch.setattr("server.active_module_names", lambda: ["core", "juridico-trabalhista"])
     for question in (
         "Atestado superior a 15 dias, como proceder?",
         "desvio de função",
@@ -83,7 +92,12 @@ def test_labor_routes_cover_common_questions():
         assert route_question(question)[0] == "juridico-trabalhista"
 
 
-def test_labor_article_search_prioritizes_context_over_duplicate_article_numbers():
+def test_labor_article_search_prioritizes_context_over_duplicate_article_numbers(tmp_path, monkeypatch):
+    knowledge_root = tmp_path / "knowledge"
+    module_root = knowledge_root / "juridico-trabalhista"
+    module_root.mkdir(parents=True)
+    (module_root / "CLT.txt").write_text("Cabe recurso ordinário no prazo de 8 (oito) dias.", encoding="utf-8")
+    monkeypatch.setattr("server.KNOWLEDGE_BASE_PATH", knowledge_root)
     evidence = module_knowledge("juridico-trabalhista", "qual prazo para recurso no direito do trabalho?")
     assert "Cabe recurso" in evidence
     assert "8 (oito) dias" in evidence

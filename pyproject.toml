@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 semantic = ["sentence-transformers>=6.0.0"]
+dev = ["pytest>=8.0"]
 
 [tool.ruff]
 line-length = 100

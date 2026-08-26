@@ -28,9 +28,21 @@ $adminPassword = Read-Host "Senha do usuário PostgreSQL '$BootstrapUser'" -AsSe
 $adminCredential = [pscredential]::new($BootstrapUser, $adminPassword)
 $adminPlain = $adminCredential.GetNetworkCredential().Password
 
-$dbName = "vaultmesh_$(New-RandomToken 8)"
-$appRole = "svc_kb_$(New-RandomToken 10)"
-$appPassword = New-RandomToken 40
+$existingDatabaseUrl = ""
+if (Test-Path $envFile) {
+  $databaseLine = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -Last 1
+  if ($databaseLine) { $existingDatabaseUrl = ($databaseLine -replace '^DATABASE_URL=', '').Trim() }
+}
+$reuseExistingDatabase = $existingDatabaseUrl -match '^postgresql\+psycopg://([^:]+):[^@]+@[^/]+/([^?]+)'
+if ($reuseExistingDatabase) {
+  $appRole = [uri]::UnescapeDataString($Matches[1])
+  $dbName = [uri]::UnescapeDataString($Matches[2])
+  $appPassword = ""
+} else {
+  $dbName = "vaultmesh_$(New-RandomToken 8)"
+  $appRole = "svc_kb_$(New-RandomToken 10)"
+  $appPassword = New-RandomToken 40
+}
 $escapedAppPassword = $appPassword.Replace("'", "''")
 
 $env:PGPASSWORD = $adminPlain
@@ -41,6 +53,9 @@ try {
   $roleQuery = @(& $psql -h 127.0.0.1 -p $Port -U $BootstrapUser -d postgres -Atqc "SELECT 1 FROM pg_roles WHERE rolname = '$appRole'")
   $roleExists = (($roleQuery -join "").Trim())
   if ($LASTEXITCODE -ne 0) { throw "Falha ao consultar usuários PostgreSQL." }
+  if ($roleExists -ne "1" -and $reuseExistingDatabase) {
+    throw "O usuário de aplicação registrado em .env.local não existe. Interrompido para preservar o banco atual."
+  }
   if ($roleExists -ne "1") {
     $createRoleSql = "CREATE ROLE `"$appRole`" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '$escapedAppPassword';"
     & $psql -h 127.0.0.1 -p $Port -U $BootstrapUser -d postgres -v ON_ERROR_STOP=1 -c $createRoleSql
@@ -56,7 +71,7 @@ try {
   }
   & $psql -h 127.0.0.1 -p $Port -U $BootstrapUser -d postgres -v ON_ERROR_STOP=1 -c "REVOKE ALL ON DATABASE `"$dbName`" FROM PUBLIC; GRANT CONNECT ON DATABASE `"$dbName`" TO `"$appRole`";" | Out-Null
 
-  $databaseUrl = "postgresql+psycopg://$appRole`:$appPassword@127.0.0.1`:$Port/$dbName?sslmode=prefer"
+  $databaseUrl = if ($reuseExistingDatabase) { $existingDatabaseUrl } else { "postgresql+psycopg://$appRole`:$appPassword@127.0.0.1`:$Port/$dbName?sslmode=prefer" }
   $migrationFiles = Get-ChildItem -LiteralPath $migrationsPath -Filter "*.sql" | Sort-Object Name
   foreach ($migrationFile in $migrationFiles) {
     & $psql -h 127.0.0.1 -p $Port -U $BootstrapUser -d $dbName -v ON_ERROR_STOP=1 -f $migrationFile.FullName
@@ -66,11 +81,15 @@ try {
   & $psql -h 127.0.0.1 -p $Port -U $BootstrapUser -d $dbName -v ON_ERROR_STOP=1 -c $grantSql | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Falha ao aplicar privilégios mínimos ao usuário da aplicação." }
 
-  @(
+  $preservedEnv = @()
+  if (Test-Path $envFile) {
+    $preservedEnv = Get-Content -LiteralPath $envFile | Where-Object { $_ -notmatch '^(DATABASE_URL|SOFIA_DB_NAME|SOFIA_DB_ROLE)=' }
+  }
+  (@($preservedEnv) + @(
     "DATABASE_URL=$databaseUrl"
     "SOFIA_DB_NAME=$dbName"
     "SOFIA_DB_ROLE=$appRole"
-  ) | Set-Content -Path $envFile -Encoding utf8
+  )) | Set-Content -Path $envFile -Encoding utf8
   $aclResult = & icacls $envFile /inheritance:r /grant:r "$($env:USERNAME):M" 2>&1
   if ($LASTEXITCODE -ne 0) {
     Write-Warning "Não foi possível ajustar a ACL de .env.local automaticamente. Verifique as permissões do arquivo manualmente."

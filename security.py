@@ -105,6 +105,7 @@ class MemoryRateLimiter:
 
 
 login_limiter = MemoryRateLimiter()
+access_request_limiter = MemoryRateLimiter(max_attempts=5, window_seconds=600)
 
 
 def encrypt_totp_secret(secret: str) -> bytes:

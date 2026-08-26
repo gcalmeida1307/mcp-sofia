@@ -848,7 +848,7 @@ function NavGlyph({ symbol }: { symbol: string }) {
   return <span aria-hidden="true" className="nav-glyph">{symbol}</span>;
 }
 
-function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boolean; theme: Theme; onThemeChange: (theme: Theme) => void; onAuthenticated: (mustChange: boolean, needsTotp?: boolean) => void }) {
+function AuthView({ setup, recoveryEnabled, theme, onThemeChange, onAuthenticated }: { setup: boolean; recoveryEnabled: boolean; theme: Theme; onThemeChange: (theme: Theme) => void; onAuthenticated: (mustChange: boolean, needsTotp?: boolean) => void }) {
   const [requestMode, setRequestMode] = useState(false);
   const [activationMode, setActivationMode] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
@@ -865,6 +865,7 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
   const [requiresOtp, setRequiresOtp] = useState(false);
   const [setupToken, setSetupToken] = useState("");
   const [totpSecret, setTotpSecret] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [setupComplete, setSetupComplete] = useState(false);
   const [error, setError] = useState("");
@@ -896,7 +897,7 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
         const recoveryResponse = await fetch("/auth/recover", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ login, email: login, identifier: login, new_password: password, recovery_token: setupToken, website: "" }) });
         const recoveryData = await recoveryResponse.json();
         if (!recoveryResponse.ok) throw new Error(recoveryData.error ?? "Não foi possível redefinir a senha.");
-        onAuthenticated(true);
+        onAuthenticated(false, Boolean(recoveryData.needs_totp_setup));
         return;
       }
       const isSetup = setup && !setupComplete;
@@ -915,6 +916,7 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
         setTotpSecret(data.totp_secret ?? "");
         setLogin(data.identifier ?? "");
         setQrDataUrl(data.qr_data_url ?? "");
+        setRecoveryCodes(data.recovery_codes ?? []);
         setSetupComplete(true);
         setError("Usuário Global criado. Cadastre o segredo no seu aplicativo autenticador e entre com o código de seis dígitos.");
       } else onAuthenticated(Boolean(data.must_change_password));
@@ -958,12 +960,12 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
           {recoveryMode && <input required type="password" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} placeholder="Token de recuperação local" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {setup && !setupComplete && <input required type="password" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} placeholder="Token de configuração" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {setup && !setupComplete && <p className="text-xs text-[var(--muted-foreground)]">A senha deve conter 8-128 caracteres, maiúscula, minúscula, número e símbolo.</p>}
-          {setupComplete && <><p className="text-xs text-[var(--muted-foreground)]">Abra o Google Authenticator, toque em “+” e escaneie este QR Code:</p>{qrDataUrl && <img src={qrDataUrl} alt="QR Code para configurar o duplo fator" className="w-48 h-48 bg-white p-2 rounded-lg" />}<p className="text-xs text-[var(--muted-foreground)]">Se não conseguir escanear, use esta chave manual:</p><code className="select-all rounded bg-[var(--muted)] border border-[var(--border)] p-2 text-xs break-all">{totpSecret}</code></>}
-          {requiresOtp && !requestMode && !activationMode && !recoveryMode && !setup && <><p className="text-xs text-[var(--muted-foreground)]">Este acesso já está protegido. Informe o código atual do Google Authenticator.</p><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /></>}
+          {setupComplete && <><p className="text-xs text-[var(--muted-foreground)]">Abra o Google Authenticator, toque em “+” e escaneie este QR Code:</p>{qrDataUrl && <img src={qrDataUrl} alt="QR Code para configurar o duplo fator" className="w-48 h-48 bg-white p-2 rounded-lg" />}<p className="text-xs text-[var(--muted-foreground)]">Se não conseguir escanear, use esta chave manual:</p><code className="select-all rounded bg-[var(--muted)] border border-[var(--border)] p-2 text-xs break-all">{totpSecret}</code>{recoveryCodes.length > 0 && <><p className="text-xs font-medium text-amber-600">Salve estes códigos de recuperação agora. Cada código funciona uma única vez.</p><code className="whitespace-pre-wrap select-all rounded bg-[var(--muted)] border border-[var(--border)] p-2 text-xs">{recoveryCodes.join("\n")}</code></>}</>}
+          {requiresOtp && !requestMode && !activationMode && !recoveryMode && !setup && <><p className="text-xs text-[var(--muted-foreground)]">Informe o código atual do autenticador ou um código de recuperação.</p><input required autoComplete="one-time-code" pattern="[0-9A-Fa-f]{6,12}" maxLength={12} value={otp} onChange={(e) => setOtp(e.target.value.replace(/[^0-9A-Fa-f]/g, "").toUpperCase())} placeholder="TOTP ou código de recuperação" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /></>}
           {setupComplete && <input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {(error || requestStatus) && <p className="text-xs text-rose-600">{error || requestStatus}</p>}
           <button disabled={busy} className="rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-medium py-2.5 text-sm">{busy ? "Aguarde..." : requestMode ? "Enviar solicitação" : activationMode ? "Criar senha e continuar" : recoveryMode ? "Redefinir senha" : setup ? "Criar acesso" : "Entrar"}</button>
-          {!setup && !setupComplete && <div className="mt-1 grid gap-2 text-xs"><button type="button" onClick={() => { const next = !activationMode; setActivationMode(next); setRequiresOtp(false); setRecoveryMode(false); setRequestMode(false); setError(""); setPassword(""); setSetupToken(""); setOtp(""); }} className={`rounded-lg border px-3 py-2 text-left font-medium transition ${activationMode ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--muted)]"}`}>{activationMode ? "← Voltar ao login" : "Primeiro acesso? Tenho um código de ativação"}</button><div className="flex flex-wrap justify-between gap-2"><button type="button" onClick={() => { setRecoveryMode(false); setActivationMode(false); setRequiresOtp(false); setRequestMode((value) => !value); setError(""); }} className="text-violet-700">{requestMode ? "Voltar ao login" : "Não possui acesso? Solicite seu cadastro"}</button><button type="button" onClick={() => { setRecoveryMode((value) => !value); setActivationMode(false); setRequiresOtp(false); setRequestMode(false); setError(""); setPassword(""); setSetupToken(""); setOtp(""); }} className="text-[var(--muted-foreground)]">{recoveryMode ? "Voltar ao login" : "Esqueci minha senha"}</button></div></div>}
+          {!setup && !setupComplete && <div className="mt-1 grid gap-2 text-xs"><button type="button" onClick={() => { const next = !activationMode; setActivationMode(next); setRequiresOtp(false); setRecoveryMode(false); setRequestMode(false); setError(""); setPassword(""); setSetupToken(""); setOtp(""); }} className={`rounded-lg border px-3 py-2 text-left font-medium transition ${activationMode ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--muted)]"}`}>{activationMode ? "← Voltar ao login" : "Primeiro acesso? Tenho um código de ativação"}</button><div className="flex flex-wrap justify-between gap-2"><button type="button" onClick={() => { setRecoveryMode(false); setActivationMode(false); setRequiresOtp(false); setRequestMode((value) => !value); setError(""); }} className="text-violet-700">{requestMode ? "Voltar ao login" : "Não possui acesso? Solicite seu cadastro"}</button>{recoveryEnabled && <button type="button" onClick={() => { setRecoveryMode((value) => !value); setActivationMode(false); setRequiresOtp(false); setRequestMode(false); setError(""); setPassword(""); setSetupToken(""); setOtp(""); }} className="text-[var(--muted-foreground)]">{recoveryMode ? "Voltar ao login" : "Recuperação administrativa"}</button>}</div></div>}
         </div>
       </form>
       <p className="absolute bottom-5 left-0 right-0 text-center text-xs text-[var(--muted-foreground)]">© {new Date().getFullYear()} S.O.F.I.A. · Todos os direitos reservados.</p>
@@ -988,6 +990,7 @@ function TotpSetupView({ onComplete }: { onComplete: () => void }) {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [otp, setOtp] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -1005,11 +1008,12 @@ function TotpSetupView({ onComplete }: { onComplete: () => void }) {
       const response = await fetch("/auth/totp/enable", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ otp }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Não foi possível ativar o autenticador.");
-      onComplete();
+      setRecoveryCodes(data.recovery_codes ?? []);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível ativar o autenticador."); }
     finally { setBusy(false); }
   }
-  return <div className="min-h-full flex items-center justify-center bg-[var(--background)] px-4 py-8"><form onSubmit={enable} className="w-full max-w-lg bg-[var(--card)] border border-[var(--border)] rounded-2xl p-7 shadow-xl"><SofiaMark size="md" /><h1 className="text-xl font-semibold text-[var(--foreground)]">Ative o duplo fator</h1><p className="text-sm text-[var(--muted-foreground)] mt-2">Senha atualizada. Agora abra o Google Authenticator, escaneie o QR Code e confirme o primeiro código.</p>{qrDataUrl && <img src={qrDataUrl} alt="QR Code para configurar o Google Authenticator" className="mx-auto mt-5 w-56 h-56 rounded-xl bg-white p-2" />}<p className="text-xs text-[var(--muted-foreground)] mt-4">Se não puder escanear, use a chave abaixo:</p><code className="block mt-1 select-all break-all rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-xs text-[var(--foreground)]">{secret || "Preparando chave..."}</code><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="mt-4 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />{error && <p className="mt-2 text-xs text-rose-600">{error}</p>}<button disabled={busy || !secret} className="mt-4 w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-white disabled:opacity-50">{busy ? "Validando..." : "Ativar duplo fator e entrar"}</button></form></div>;
+  if (recoveryCodes.length > 0) return <div className="min-h-full flex items-center justify-center bg-[var(--background)] px-4 py-8"><section className="w-full max-w-lg bg-[var(--card)] border border-[var(--border)] rounded-2xl p-7 shadow-xl"><SofiaMark size="md" /><h1 className="text-xl font-semibold text-[var(--foreground)]">Guarde seus códigos de recuperação</h1><p className="mt-2 text-sm text-[var(--muted-foreground)]">Eles aparecem apenas agora. Cada código substitui o TOTP uma única vez.</p><code className="mt-5 block select-all whitespace-pre-wrap rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">{recoveryCodes.join("\n")}</code><button type="button" onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))} className="mt-3 w-full rounded-lg border border-[var(--border)] py-2.5 text-sm font-medium">Copiar códigos</button><button type="button" onClick={onComplete} className="mt-3 w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-white">Já salvei os códigos · entrar</button></section></div>;
+  return <div className="min-h-full flex items-center justify-center bg-[var(--background)] px-4 py-8"><form onSubmit={enable} className="w-full max-w-lg bg-[var(--card)] border border-[var(--border)] rounded-2xl p-7 shadow-xl"><SofiaMark size="md" /><h1 className="text-xl font-semibold text-[var(--foreground)]">Ative o duplo fator</h1><p className="text-sm text-[var(--muted-foreground)] mt-2">Abra o autenticador, escaneie o QR Code e confirme o primeiro código. A sessão ainda não possui acesso aos módulos.</p>{qrDataUrl && <img src={qrDataUrl} alt="QR Code para configurar o autenticador" className="mx-auto mt-5 w-56 h-56 rounded-xl bg-white p-2" />}<p className="text-xs text-[var(--muted-foreground)] mt-4">Se não puder escanear, use a chave abaixo:</p><code className="block mt-1 select-all break-all rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-xs text-[var(--foreground)]">{secret || "Preparando chave..."}</code><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="mt-4 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />{error && <p className="mt-2 text-xs text-rose-600">{error}</p>}<button disabled={busy || !secret} className="mt-4 w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-white disabled:opacity-50">{busy ? "Validando..." : "Ativar duplo fator"}</button></form></div>;
 }
 
 function UsersView() {
@@ -1058,7 +1062,6 @@ function UsersView() {
     const response = await fetch(`/auth/access-requests/${id}/decision`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision, module, module_role: approvalRole, reason: decision === "rejected" ? "Rejeitado pelo administrador Global." : "Aprovado pelo administrador Global." }) });
     const data = await response.json(); setStatus(response.ok ? `Solicitação ${decision === "approved" ? "aprovada" : "rejeitada"}.` : data.error ?? "Não foi possível decidir."); if (response.ok && data.activation_token) { setTotpSetup(`Acesso aprovado para ${data.identifier}. Envie este código de ativação ao usuário por um canal seguro. Ele criará a própria senha e depois configurará o Google Authenticator.`); setTotpQr(""); setTotpSecret(data.activation_token); } await loadRequests(); await loadUsers();
   }
-  async function approve(id: string) { const response = await fetch(`/auth/users/${id}/approve`, { method: "POST", credentials: "include" }); setStatus(response.ok ? "Usuário aprovado." : "Não foi possível aprovar."); await loadUsers(); }
 
   return <div className="min-h-full w-full overflow-y-auto p-6 pb-12">
     <h2 className="text-xl font-semibold text-[var(--foreground)]">Usuários e aprovações</h2>
@@ -1076,7 +1079,7 @@ function UsersView() {
       <select value={module} onChange={(e) => setModule(e.target.value)} className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm">{availableModules.map((item) => <option key={item.slug} value={item.slug}>{item.display_name}</option>)}</select>
       <button className="rounded-lg bg-violet-600 text-white py-2 text-sm font-medium">Criar solicitação de acesso</button>
     </form>
-    <div className="mt-6 grid gap-2 max-w-3xl">{users.map((user) => <div key={user.id} className="flex items-center gap-3 bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 text-sm"><span className="flex-1"><b>{user.display_name}</b><span className="block text-xs text-[var(--muted-foreground)]">{user.email} · {user.role} · {user.status}</span></span>{user.status === "pending" && <button onClick={() => approve(user.id)} className="px-3 py-1.5 rounded bg-emerald-600 text-white text-xs">Aprovar</button>}</div>)}</div>
+    <div className="mt-6 grid gap-2 max-w-3xl">{users.map((user) => <div key={user.id} className="flex items-center gap-3 bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 text-sm"><span className="flex-1"><b>{user.display_name}</b><span className="block text-xs text-[var(--muted-foreground)]">{user.email} · {user.role} · {user.status}</span></span>{user.status === "pending" && <span className="rounded-full border border-amber-300/40 bg-amber-400/10 px-2.5 py-1 text-[11px] text-amber-600">Aguardando ativação e TOTP</span>}</div>)}</div>
   </div>;
 }
 
@@ -1246,6 +1249,7 @@ function AutomationsView({ moduleId }: { moduleId: ModuleId }) { const [workflow
 
 export default function App() {
   const [authState, setAuthState] = useState<"loading" | "login" | "setup" | "change-password" | "setup-2fa" | "authenticated">("loading");
+  const [recoveryEnabled, setRecoveryEnabled] = useState(false);
   const [userRole, setUserRole] = useState<string>("");
   const [userName, setUserName] = useState("");
   const [allowedModules, setAllowedModules] = useState<ModuleId[]>(["core"]);
@@ -1267,7 +1271,7 @@ export default function App() {
   useEffect(() => {
     fetch("/auth/status", { credentials: "include" })
       .then((response) => response.json())
-      .then((data) => setAuthState(data.configured ? "login" : "setup"))
+      .then((data) => { setRecoveryEnabled(Boolean(data.break_glass_recovery)); setAuthState(data.configured ? "login" : "setup"); })
       .catch(() => setAuthState("login"));
   }, []);
 
@@ -1279,7 +1283,7 @@ export default function App() {
   if (authState === "loading") return <div className="min-h-full flex items-center justify-center text-sm text-[var(--muted-foreground)]">Carregando autenticação...</div>;
   if (authState === "change-password") return <ChangePasswordView onComplete={() => setAuthState("setup-2fa")} />;
   if (authState === "setup-2fa") return <TotpSetupView onComplete={() => setAuthState("authenticated")} />;
-  if (authState !== "authenticated") return <AuthView setup={authState === "setup"} theme={theme} onThemeChange={setTheme} onAuthenticated={(mustChange, needsTotp) => setAuthState(needsTotp ? "setup-2fa" : mustChange ? "change-password" : "authenticated")} />;
+  if (authState !== "authenticated") return <AuthView setup={authState === "setup"} recoveryEnabled={recoveryEnabled} theme={theme} onThemeChange={setTheme} onAuthenticated={(mustChange, needsTotp) => setAuthState(needsTotp ? "setup-2fa" : mustChange ? "change-password" : "authenticated")} />;
 
   function handleModuleSelect(id: ModuleId) {
     setActiveModule(id);
