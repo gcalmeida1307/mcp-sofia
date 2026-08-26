@@ -234,7 +234,7 @@ textarea { overflow-x: hidden; overflow-wrap: anywhere; }
   background: color-mix(in srgb, var(--module-accent, var(--primary)) 82%, var(--background));
   letter-spacing: .02em;
 }
-.app-content { background: var(--background); }
+.app-content { background: var(--background); min-height: 0; }
 .app-content > * { color: var(--foreground); }
 .app-content [class*="bg-[var(--card)]"] {
   background: var(--card) !important;

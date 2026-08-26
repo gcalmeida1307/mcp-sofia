@@ -848,8 +848,10 @@ function NavGlyph({ symbol }: { symbol: string }) {
   return <span aria-hidden="true" className="nav-glyph">{symbol}</span>;
 }
 
-function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boolean; theme: Theme; onThemeChange: (theme: Theme) => void; onAuthenticated: (mustChange: boolean) => void }) {
+function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boolean; theme: Theme; onThemeChange: (theme: Theme) => void; onAuthenticated: (mustChange: boolean, needsTotp?: boolean) => void }) {
   const [requestMode, setRequestMode] = useState(false);
+  const [activationMode, setActivationMode] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [requestModule, setRequestModule] = useState("infraestrutura");
@@ -860,6 +862,7 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
+  const [requiresOtp, setRequiresOtp] = useState(false);
   const [setupToken, setSetupToken] = useState("");
   const [totpSecret, setTotpSecret] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -882,6 +885,20 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
     setBusy(true);
     setError("");
     try {
+      if (activationMode) {
+        const activationResponse = await fetch("/auth/activate", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ login, activation_token: setupToken, new_password: password, website: "" }) });
+        const activationData = await activationResponse.json();
+        if (!activationResponse.ok) throw new Error(activationData.error ?? "Não foi possível ativar o acesso.");
+        onAuthenticated(false, Boolean(activationData.needs_totp_setup));
+        return;
+      }
+      if (recoveryMode) {
+        const recoveryResponse = await fetch("/auth/recover", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ login, email: login, identifier: login, new_password: password, recovery_token: setupToken, website: "" }) });
+        const recoveryData = await recoveryResponse.json();
+        if (!recoveryResponse.ok) throw new Error(recoveryData.error ?? "Não foi possível redefinir a senha.");
+        onAuthenticated(true);
+        return;
+      }
       const isSetup = setup && !setupComplete;
       const response = await fetch(isSetup ? "/auth/setup" : "/auth/login", {
         method: "POST",
@@ -890,7 +907,10 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
         body: JSON.stringify({ email, login: login || email, matricula: login || email, identifier: login || email, password, otp, setup_token: setupToken, website: "" }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Não foi possível concluir a autenticação.");
+      if (!response.ok) {
+        if (data.code === "OTP_REQUIRED") setRequiresOtp(true);
+        throw new Error(data.error ?? "Não foi possível concluir a autenticação.");
+      }
       if (isSetup) {
         setTotpSecret(data.totp_secret ?? "");
         setLogin(data.identifier ?? "");
@@ -926,21 +946,24 @@ function AuthView({ setup, theme, onThemeChange, onAuthenticated }: { setup: boo
       <button type="button" onClick={() => onThemeChange(theme === "light" ? "dark" : "light")} className="absolute right-4 top-4 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)] shadow-sm hover:text-[var(--foreground)]" aria-label="Alternar modo de cor">{theme === "light" ? "☾ Modo escuro" : "☀ Modo claro"}</button>
       <form onSubmit={requestMode ? requestAccess : submit} className="w-full max-w-md bg-[var(--card)] border-2 border-violet-200 dark:border-violet-900/70 rounded-2xl p-8 shadow-xl">
         <SofiaMark size="md" />
-        <h1 className="text-xl font-semibold text-[var(--foreground)]">{requestMode ? "Solicitar acesso" : setup && !setupComplete ? "Criar usuário Global" : "Entrar na Sofia"}</h1>
-        <p className="text-sm text-[var(--muted-foreground)] mt-2">{requestMode ? "Seu cadastro ficará pendente até aprovação do administrador. O autenticador será configurado depois da aprovação." : setup && !setupComplete ? "O primeiro usuário terá acesso global e duplo fator obrigatório." : "Acesse somente os módulos autorizados."}</p>
+        <h1 className="text-xl font-semibold text-[var(--foreground)]">{requestMode ? "Solicitar acesso" : activationMode ? "Ativar primeiro acesso" : recoveryMode ? "Redefinir acesso" : setup && !setupComplete ? "Criar usuário Global" : "Entrar na Sofia"}</h1>
+        <p className="text-sm text-[var(--muted-foreground)] mt-2">{requestMode ? "Seu cadastro ficará pendente até aprovação do administrador. O autenticador será configurado depois da aprovação." : activationMode ? "Use o convite recebido após a aprovação. Você criará sua própria senha; o administrador não terá acesso a ela." : recoveryMode ? "Informe seu e-mail ou matrícula e o token de recuperação local. Depois, você trocará a senha e configurará um novo QR Code." : setup && !setupComplete ? "O primeiro usuário terá acesso global e duplo fator obrigatório." : "Acesse somente os módulos autorizados."}</p>
         <div className="mt-6 grid gap-3">
           {requestMode && <><input required value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Nome" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /><input required value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Sobrenome" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /></>}
           {requestMode || (setup && !setupComplete) ? <input required type="email" value={email} onChange={(e) => { setEmail(e.target.value); setLogin(e.target.value); }} placeholder="E-mail" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /> : <input required value={login} onChange={(e) => setLogin(e.target.value)} placeholder="Matrícula (AG000001) ou e-mail" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {requestMode && <><select value={requestModule} onChange={(e) => setRequestModule(e.target.value)} className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm">{requestModules.map((item) => <option key={item.slug} value={item.slug}>{item.display_name}</option>)}</select><textarea value={justification} onChange={(e) => setJustification(e.target.value)} placeholder="Justificativa do acesso (opcional)" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /></>}
-          {!requestMode && <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
+          {!requestMode && <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={activationMode || recoveryMode ? "Crie uma senha forte" : "Senha"} className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
+          {activationMode && <p className="text-xs text-[var(--muted-foreground)]">A senha deve conter 8–128 caracteres, maiúscula, minúscula, número e símbolo.</p>}
+          {activationMode && <input required type="password" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} placeholder="Código de ativação recebido" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
+          {recoveryMode && <input required type="password" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} placeholder="Token de recuperação local" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {setup && !setupComplete && <input required type="password" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} placeholder="Token de configuração" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {setup && !setupComplete && <p className="text-xs text-[var(--muted-foreground)]">A senha deve conter 8-128 caracteres, maiúscula, minúscula, número e símbolo.</p>}
           {setupComplete && <><p className="text-xs text-[var(--muted-foreground)]">Abra o Google Authenticator, toque em “+” e escaneie este QR Code:</p>{qrDataUrl && <img src={qrDataUrl} alt="QR Code para configurar o duplo fator" className="w-48 h-48 bg-white p-2 rounded-lg" />}<p className="text-xs text-[var(--muted-foreground)]">Se não conseguir escanear, use esta chave manual:</p><code className="select-all rounded bg-[var(--muted)] border border-[var(--border)] p-2 text-xs break-all">{totpSecret}</code></>}
-          {!requestMode && !setup && <input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código do Google Authenticator" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
+          {requiresOtp && !requestMode && !activationMode && !recoveryMode && !setup && <><p className="text-xs text-[var(--muted-foreground)]">Este acesso já está protegido. Informe o código atual do Google Authenticator.</p><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /></>}
           {setupComplete && <input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />}
           {(error || requestStatus) && <p className="text-xs text-rose-600">{error || requestStatus}</p>}
-          <button disabled={busy} className="rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-medium py-2.5 text-sm">{busy ? "Aguarde..." : requestMode ? "Enviar solicitação" : setup ? "Criar acesso" : "Entrar"}</button>
-          {!setup && !setupComplete && <div className="flex justify-between text-xs"><button type="button" onClick={() => setRequestMode((value) => !value)} className="text-violet-700">{requestMode ? "Voltar ao login" : "Não possui acesso? Solicite seu cadastro"}</button><button type="button" onClick={() => setError("Recuperação por e-mail será habilitada quando o SMTP for configurado.")} className="text-[var(--muted-foreground)]">Esqueci minha senha</button></div>}
+          <button disabled={busy} className="rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-medium py-2.5 text-sm">{busy ? "Aguarde..." : requestMode ? "Enviar solicitação" : activationMode ? "Criar senha e continuar" : recoveryMode ? "Redefinir senha" : setup ? "Criar acesso" : "Entrar"}</button>
+          {!setup && !setupComplete && <div className="mt-1 grid gap-2 text-xs"><button type="button" onClick={() => { const next = !activationMode; setActivationMode(next); setRequiresOtp(false); setRecoveryMode(false); setRequestMode(false); setError(""); setPassword(""); setSetupToken(""); setOtp(""); }} className={`rounded-lg border px-3 py-2 text-left font-medium transition ${activationMode ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--muted)]"}`}>{activationMode ? "← Voltar ao login" : "Primeiro acesso? Tenho um código de ativação"}</button><div className="flex flex-wrap justify-between gap-2"><button type="button" onClick={() => { setRecoveryMode(false); setActivationMode(false); setRequiresOtp(false); setRequestMode((value) => !value); setError(""); }} className="text-violet-700">{requestMode ? "Voltar ao login" : "Não possui acesso? Solicite seu cadastro"}</button><button type="button" onClick={() => { setRecoveryMode((value) => !value); setActivationMode(false); setRequiresOtp(false); setRequestMode(false); setError(""); setPassword(""); setSetupToken(""); setOtp(""); }} className="text-[var(--muted-foreground)]">{recoveryMode ? "Voltar ao login" : "Esqueci minha senha"}</button></div></div>}
         </div>
       </form>
       <p className="absolute bottom-5 left-0 right-0 text-center text-xs text-[var(--muted-foreground)]">© {new Date().getFullYear()} S.O.F.I.A. · Todos os direitos reservados.</p>
@@ -961,6 +984,34 @@ function ChangePasswordView({ onComplete }: { onComplete: () => void }) {
   return <div className="min-h-full flex items-center justify-center bg-[var(--background)] px-4"><form onSubmit={submit} className="w-full max-w-md bg-[var(--card)] border border-[var(--border)] rounded-2xl p-7 shadow-xl"><h1 className="text-xl font-semibold text-[var(--foreground)]">Troca obrigatória de senha</h1><p className="text-sm text-[var(--muted-foreground)] mt-2">Defina uma nova senha antes de acessar o sistema.</p><input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Nova senha" className="mt-5 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" /><p className="text-xs text-[var(--muted-foreground)] mt-2">Use 8-128 caracteres, maiúscula, minúscula, número e símbolo.</p>{error && <p className="text-xs text-rose-600 mt-2">{error}</p>}<button className="mt-4 w-full rounded-lg bg-violet-600 text-white py-2.5 text-sm font-medium">Salvar nova senha</button></form></div>;
 }
 
+function TotpSetupView({ onComplete }: { onComplete: () => void }) {
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [secret, setSecret] = useState("");
+  const [otp, setOtp] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    fetch("/auth/totp/setup", { credentials: "include" }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Não foi possível preparar o autenticador.");
+      if (data.enabled) return onComplete();
+      setQrDataUrl(data.qr_data_url ?? "");
+      setSecret(data.totp_secret ?? "");
+    }).catch((cause) => setError(cause instanceof Error ? cause.message : "Não foi possível preparar o autenticador."));
+  }, [onComplete]);
+  async function enable(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError("");
+    try {
+      const response = await fetch("/auth/totp/enable", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ otp }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Não foi possível ativar o autenticador.");
+      onComplete();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível ativar o autenticador."); }
+    finally { setBusy(false); }
+  }
+  return <div className="min-h-full flex items-center justify-center bg-[var(--background)] px-4 py-8"><form onSubmit={enable} className="w-full max-w-lg bg-[var(--card)] border border-[var(--border)] rounded-2xl p-7 shadow-xl"><SofiaMark size="md" /><h1 className="text-xl font-semibold text-[var(--foreground)]">Ative o duplo fator</h1><p className="text-sm text-[var(--muted-foreground)] mt-2">Senha atualizada. Agora abra o Google Authenticator, escaneie o QR Code e confirme o primeiro código.</p>{qrDataUrl && <img src={qrDataUrl} alt="QR Code para configurar o Google Authenticator" className="mx-auto mt-5 w-56 h-56 rounded-xl bg-white p-2" />}<p className="text-xs text-[var(--muted-foreground)] mt-4">Se não puder escanear, use a chave abaixo:</p><code className="block mt-1 select-all break-all rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-xs text-[var(--foreground)]">{secret || "Preparando chave..."}</code><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Código de 6 dígitos" className="mt-4 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm" />{error && <p className="mt-2 text-xs text-rose-600">{error}</p>}<button disabled={busy || !secret} className="mt-4 w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-white disabled:opacity-50">{busy ? "Validando..." : "Ativar duplo fator e entrar"}</button></form></div>;
+}
+
 function UsersView() {
   const [users, setUsers] = useState<Array<{ id: string; email: string; display_name: string; role: string; status: string }>>([]);
   const [requests, setRequests] = useState<Array<{ id: string; first_name: string; last_name: string; email: string; requested_module: string; justification: string; status: string }>>([]);
@@ -969,7 +1020,6 @@ function UsersView() {
   const [password, setPassword] = useState("");
   const [module, setModule] = useState("infraestrutura");
   const [status, setStatus] = useState("");
-  const [temporaryPassword, setTemporaryPassword] = useState("");
   const [totpSetup, setTotpSetup] = useState("");
   const [totpQr, setTotpQr] = useState("");
   const [totpSecret, setTotpSecret] = useState("");
@@ -980,34 +1030,51 @@ function UsersView() {
     const response = await fetch("/auth/users", { credentials: "include" });
     if (response.ok) setUsers((await response.json()).users ?? []);
   }
-  async function loadRequests() { const response = await fetch("/auth/access-requests", { credentials: "include" }); if (response.ok) setRequests((await response.json()).requests ?? []); }
-  useEffect(() => { void loadUsers(); void loadRequests(); fetch("/auth/available-modules").then((response) => response.json()).then((data) => setAvailableModules(data.modules ?? [])).catch(() => undefined); }, []);
+  async function loadRequests() {
+    const response = await fetch("/auth/access-requests", { credentials: "include" });
+    if (response.ok) {
+      setRequests((await response.json()).requests ?? []);
+      return;
+    }
+    const payload = await response.json().catch(() => ({}));
+    setStatus(payload.error || "Não foi possível carregar as solicitações de acesso.");
+  }
+  useEffect(() => {
+    void loadUsers();
+    void loadRequests();
+    const refreshTimer = window.setInterval(() => { void loadRequests(); }, 10000);
+    fetch("/auth/available-modules").then((response) => response.json()).then((data) => setAvailableModules(data.modules ?? [])).catch(() => undefined);
+    return () => window.clearInterval(refreshTimer);
+  }, []);
 
   async function createUser(e: FormEvent) {
     e.preventDefault();
-    const response = await fetch("/auth/users", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, display_name: displayName, password, module }) });
+    const response = await fetch("/auth/users", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, display_name: displayName, module }) });
     const data = await response.json();
     setStatus(response.ok ? "Usuário criado e aguardando aprovação." : data.error ?? "Falha ao criar usuário.");
-    if (response.ok) { setEmail(""); setDisplayName(""); setPassword(""); await loadUsers(); }
+    if (response.ok) { setEmail(""); setDisplayName(""); await loadRequests(); await loadUsers(); }
   }
   async function decide(id: string, decision: "approved" | "rejected", module: string) {
-    const response = await fetch(`/auth/access-requests/${id}/decision`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision, module, module_role: approvalRole, temporary_password: temporaryPassword, reason: decision === "rejected" ? "Rejeitado pelo administrador Global." : "Aprovado pelo administrador Global." }) });
-    const data = await response.json(); setStatus(response.ok ? `Solicitação ${decision === "approved" ? "aprovada" : "rejeitada"}.` : data.error ?? "Não foi possível decidir."); if (response.ok && data.totp_secret) { setTotpSetup(`Acesso aprovado para ${data.identifier}. Mostre o QR Code ao usuário por um canal seguro. Depois de configurar o Google Authenticator, ele usará a senha temporária e o código de 6 dígitos no primeiro login.`); setTotpQr(data.qr_data_url ?? ""); setTotpSecret(data.totp_secret); } await loadRequests(); await loadUsers();
+    const response = await fetch(`/auth/access-requests/${id}/decision`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision, module, module_role: approvalRole, reason: decision === "rejected" ? "Rejeitado pelo administrador Global." : "Aprovado pelo administrador Global." }) });
+    const data = await response.json(); setStatus(response.ok ? `Solicitação ${decision === "approved" ? "aprovada" : "rejeitada"}.` : data.error ?? "Não foi possível decidir."); if (response.ok && data.activation_token) { setTotpSetup(`Acesso aprovado para ${data.identifier}. Envie este código de ativação ao usuário por um canal seguro. Ele criará a própria senha e depois configurará o Google Authenticator.`); setTotpQr(""); setTotpSecret(data.activation_token); } await loadRequests(); await loadUsers();
   }
   async function approve(id: string) { const response = await fetch(`/auth/users/${id}/approve`, { method: "POST", credentials: "include" }); setStatus(response.ok ? "Usuário aprovado." : "Não foi possível aprovar."); await loadUsers(); }
 
-  return <div className="h-full overflow-y-auto p-6">
+  return <div className="min-h-full w-full overflow-y-auto p-6 pb-12">
     <h2 className="text-xl font-semibold text-[var(--foreground)]">Usuários e aprovações</h2>
-    <p className="text-sm text-[var(--muted-foreground)] mt-1">Somente o usuário Global pode criar, aprovar ou rejeitar acessos.</p>
+    <p className="text-sm text-[var(--muted-foreground)] mt-1">Somente o perfil CORE · Administrador Global pode criar, aprovar ou rejeitar acessos.</p>
+    {status && <div role="status" className="mt-4 max-w-5xl rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--foreground)]">{status}</div>}
     {totpSetup && <div className="mt-3 max-w-3xl rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"><p>{totpSetup}</p>{totpQr && <><img src={totpQr} alt="QR Code para configurar o Google Authenticator" className="mt-3 w-48 h-48 bg-white p-2 rounded-lg" /><a href={totpQr} download="sofia-google-authenticator.png" className="inline-block mt-2 text-violet-700 underline">Baixar QR Code</a></>} {totpSecret && <><p className="mt-3">Configuração manual:</p><code className="block select-all rounded bg-white border border-amber-200 p-2 mt-1 break-all">{totpSecret}</code></>}</div>}
-    <div className="mt-5 max-w-3xl"><h3 className="font-semibold text-[var(--foreground)]">Solicitações pendentes</h3><input type="password" value={temporaryPassword} onChange={(e) => setTemporaryPassword(e.target.value)} placeholder="Senha temporária para aprovações (8+, maiúscula, número e símbolo)" className="mt-2 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" /><select value={approvalRole} onChange={(e) => setApprovalRole(e.target.value)} className="mt-2 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm"><option value="operator">Operador · somente leitura</option><option value="manager">Gestor · pode inserir no módulo</option><option value="global">Global · todos os módulos</option></select><div className="mt-3 grid gap-2">{requests.filter((item) => item.status === "pending").map((item) => <div key={item.id} className="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 text-sm"><b>{item.first_name} {item.last_name}</b><span className="block text-xs text-[var(--muted-foreground)]">{item.email} · módulo solicitado: {item.requested_module}</span>{item.justification && <span className="block text-xs mt-1">{item.justification}</span>}<div className="flex gap-2 mt-3"><button onClick={() => decide(item.id, "approved", item.requested_module)} className="px-3 py-1.5 rounded bg-emerald-600 text-white text-xs">Aprovar</button><button onClick={() => decide(item.id, "rejected", item.requested_module)} className="px-3 py-1.5 rounded bg-rose-600 text-white text-xs">Rejeitar</button></div></div>)}</div></div>
-    <form onSubmit={createUser} className="mt-5 grid gap-3 max-w-xl bg-[var(--card)] border border-[var(--border)] rounded-xl p-4">
+    <div className="mt-5 max-w-5xl rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-[var(--foreground)]">Solicitações pendentes <span className="text-xs font-normal text-[var(--muted-foreground)]">({requests.filter((item) => item.status === "pending").length})</span></h3><p className="mt-1 text-xs text-[var(--muted-foreground)]">Revise os dados, escolha a função e defina a senha do primeiro acesso.</p></div><button type="button" onClick={() => void loadRequests()} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--muted)]">Atualizar solicitações</button></div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2"><div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-xs text-[var(--muted-foreground)]">O usuário criará a própria senha durante a ativação. O administrador nunca visualiza nem define essa senha.</div><label className="text-xs font-medium text-[var(--foreground)]">Função concedida<select value={approvalRole} onChange={(e) => setApprovalRole(e.target.value)} className="mt-1.5 w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm"><option value="operator">Operador · somente leitura</option><option value="manager">Gestor · pode inserir no módulo</option><option value="global">Administrador Global · todos os módulos</option></select></label></div>
+      <div className="mt-5 grid gap-3">{requests.filter((item) => item.status === "pending").map((item) => <div key={item.id} className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><b className="text-[var(--foreground)]">{item.first_name} {item.last_name}</b><span className="block mt-1 text-xs text-[var(--muted-foreground)]">{item.email}</span></div><span className="rounded-full border border-amber-300/40 bg-amber-400/10 px-2.5 py-1 text-[11px] text-amber-600">Aguardando decisão</span></div><div className="mt-3 grid gap-1 text-xs text-[var(--muted-foreground)]"><span><strong className="text-[var(--foreground)]">Módulo solicitado:</strong> {item.requested_module}</span>{item.justification && <span><strong className="text-[var(--foreground)]">Justificativa:</strong> {item.justification}</span>}</div><div className="mt-4 flex flex-wrap gap-2"><button onClick={() => decide(item.id, "approved", item.requested_module)} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Aprovar acesso</button><button onClick={() => decide(item.id, "rejected", item.requested_module)} className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700">Rejeitar</button></div></div>)}</div>
+    </div>
+    <form onSubmit={createUser} className="mt-6 grid gap-3 max-w-xl bg-[var(--card)] border border-[var(--border)] rounded-xl p-4"><div><h3 className="font-semibold text-[var(--foreground)]">Criar solicitação pelo CORE</h3><p className="mt-1 text-xs text-[var(--muted-foreground)]">O administrador informa apenas identidade e módulo. A senha será criada pelo próprio usuário após a aprovação.</p></div>
       <input required value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Nome de exibição" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
       <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
-      <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha inicial" className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
       <select value={module} onChange={(e) => setModule(e.target.value)} className="bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm">{availableModules.map((item) => <option key={item.slug} value={item.slug}>{item.display_name}</option>)}</select>
-      <button className="rounded-lg bg-violet-600 text-white py-2 text-sm font-medium">Criar usuário pendente</button>
-      {status && <p className="text-xs text-[var(--muted-foreground)]">{status}</p>}
+      <button className="rounded-lg bg-violet-600 text-white py-2 text-sm font-medium">Criar solicitação de acesso</button>
     </form>
     <div className="mt-6 grid gap-2 max-w-3xl">{users.map((user) => <div key={user.id} className="flex items-center gap-3 bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 text-sm"><span className="flex-1"><b>{user.display_name}</b><span className="block text-xs text-[var(--muted-foreground)]">{user.email} · {user.role} · {user.status}</span></span>{user.status === "pending" && <button onClick={() => approve(user.id)} className="px-3 py-1.5 rounded bg-emerald-600 text-white text-xs">Aprovar</button>}</div>)}</div>
   </div>;
@@ -1178,7 +1245,7 @@ function AutomationsView({ moduleId }: { moduleId: ModuleId }) { const [workflow
 // ── Main App ──────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [authState, setAuthState] = useState<"loading" | "login" | "setup" | "change-password" | "authenticated">("loading");
+  const [authState, setAuthState] = useState<"loading" | "login" | "setup" | "change-password" | "setup-2fa" | "authenticated">("loading");
   const [userRole, setUserRole] = useState<string>("");
   const [userName, setUserName] = useState("");
   const [allowedModules, setAllowedModules] = useState<ModuleId[]>(["core"]);
@@ -1210,8 +1277,9 @@ export default function App() {
   }, [authState]);
 
   if (authState === "loading") return <div className="min-h-full flex items-center justify-center text-sm text-[var(--muted-foreground)]">Carregando autenticação...</div>;
-  if (authState === "change-password") return <ChangePasswordView onComplete={() => setAuthState("authenticated")} />;
-  if (authState !== "authenticated") return <AuthView setup={authState === "setup"} theme={theme} onThemeChange={setTheme} onAuthenticated={(mustChange) => setAuthState(mustChange ? "change-password" : "authenticated")} />;
+  if (authState === "change-password") return <ChangePasswordView onComplete={() => setAuthState("setup-2fa")} />;
+  if (authState === "setup-2fa") return <TotpSetupView onComplete={() => setAuthState("authenticated")} />;
+  if (authState !== "authenticated") return <AuthView setup={authState === "setup"} theme={theme} onThemeChange={setTheme} onAuthenticated={(mustChange, needsTotp) => setAuthState(needsTotp ? "setup-2fa" : mustChange ? "change-password" : "authenticated")} />;
 
   function handleModuleSelect(id: ModuleId) {
     setActiveModule(id);

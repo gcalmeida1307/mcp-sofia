@@ -14,6 +14,7 @@ from io import BytesIO
 import ipaddress
 import socket
 import tempfile
+import secrets
 import urllib.error
 import urllib.request
 import zipfile
@@ -79,6 +80,10 @@ MAX_URL_BYTES = int(os.getenv("SOFIA_MAX_URL_BYTES", str(2 * 1024 * 1024)))
 MAX_CRAWL_PAGES = int(os.getenv("SOFIA_MAX_CRAWL_PAGES", "20"))
 MAX_CRAWL_TOTAL_BYTES = int(os.getenv("SOFIA_MAX_CRAWL_TOTAL_BYTES", str(25 * 1024 * 1024)))
 MAX_CRAWL_DEPTH = int(os.getenv("SOFIA_MAX_CRAWL_DEPTH", "2"))
+try:
+    ACTIVATION_TOKEN_MINUTES = max(1, min(10, int(os.getenv("SOFIA_ACTIVATION_TOKEN_MINUTES", "10"))))
+except ValueError:
+    ACTIVATION_TOKEN_MINUTES = 10
 MAX_LINKED_DOCUMENTS = int(os.getenv("SOFIA_MAX_LINKED_DOCUMENTS", "20"))
 MAX_INPUT_CHARS = int(os.getenv("SOFIA_MAX_INPUT_CHARS", "12000"))
 EMBEDDINGS_ENABLED = os.getenv("SOFIA_EMBEDDINGS_ENABLED", "0") == "1"
@@ -884,7 +889,7 @@ def audit_event(user_id: str | None, event_type: str, request: Request | None = 
         engine.dispose()
 
 
-PUBLIC_PATHS = frozenset({"/health", "/auth/status", "/auth/setup", "/auth/login", "/auth/logout", "/auth/access-request", "/auth/available-modules"})
+PUBLIC_PATHS = frozenset({"/health", "/auth/status", "/auth/setup", "/auth/login", "/auth/recover", "/auth/logout", "/auth/access-request", "/auth/available-modules"})
 
 
 def is_public_path(path: str) -> bool:
@@ -1085,22 +1090,111 @@ async def auth_login(request: Request) -> JSONResponse:
             ).first()
             if not row or row[3] != "active" or not verify_password(row[1] if row else None, password):
                 return JSONResponse(generic_auth_failure(), status_code=401)
-            try:
-                secret = decrypt_totp_secret(row[4]) if row[4] else ""
-                if not secret or not pyotp.TOTP(secret).verify(str(payload.get("otp", "")), valid_window=1):
-                    return JSONResponse(generic_auth_failure(), status_code=401)
-            except Exception:
-                return JSONResponse(generic_auth_failure(), status_code=401)
-            if row[5] is None:
-                connection.execute(text("UPDATE user_totp SET enabled_at = now() WHERE user_id = CAST(:user_id AS uuid)"), {"user_id": row[0]})
+            # Aprovados entram uma vez sem TOTP para trocar a senha e
+            # configurar o autenticador. O TOTP só é exigido depois disso.
+            if not row[6]:
+                try:
+                    secret = decrypt_totp_secret(row[4]) if row[4] else ""
+                    if not secret or not pyotp.TOTP(secret).verify(str(payload.get("otp", "")), valid_window=1):
+                        return JSONResponse({"error": "Informe o código do autenticador.", "code": "OTP_REQUIRED"}, status_code=401)
+                    if row[5] is None:
+                        connection.execute(text("UPDATE user_totp SET enabled_at = now() WHERE user_id = CAST(:user_id AS uuid)"), {"user_id": row[0]})
+                except Exception:
+                    return JSONResponse({"error": "Informe o código do autenticador.", "code": "OTP_REQUIRED"}, status_code=401)
             raw_token, token_hash = new_session_token()
             connection.execute(
                 text("""INSERT INTO app_sessions (token_hash, user_id, expires_at)
                        VALUES (:token_hash, CAST(:user_id AS uuid), now() + interval '8 hours')"""),
                 {"token_hash": token_hash, "user_id": row[0]},
             )
-        response = JSONResponse({"status": "ok", "role": row[2], "must_change_password": row[6]})
+        response = JSONResponse({"status": "ok", "role": row[2], "must_change_password": row[6], "totp_enabled": row[5] is not None})
         response.set_cookie("sofia_session", raw_token, httponly=True, samesite="lax", secure=os.getenv("SOFIA_COOKIE_SECURE", "0") == "1", max_age=8 * 3600, path="/")
+        return response
+    except Exception:
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    finally:
+        engine.dispose()
+
+
+@mcp.custom_route("/auth/activate", methods=["POST"])
+async def auth_activate(request: Request) -> JSONResponse:
+    """First access: use a one-time invitation, then create the password."""
+    payload = await request.json()
+    client_key = request.client.host if request.client else "unknown"
+    if not login_limiter.allowed(client_key) or honeypot_triggered(payload):
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    login = str(payload.get("login") or payload.get("email") or payload.get("identifier") or "").strip()[:320]
+    activation_token = str(payload.get("activation_token", ""))[:256]
+    new_password = str(payload.get("new_password", ""))
+    if not login or not activation_token or not validate_password(new_password):
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    email = login.lower() if "@" in login else ""
+    identifier = login.upper() if not email else ""
+    engine = database_engine()
+    if engine is None:
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    try:
+        from sqlalchemy import text
+        with engine.begin() as connection:
+            row = connection.execute(text("""SELECT u.id::text, u.email
+                FROM app_users u LEFT JOIN user_identifiers i ON i.user_id=u.id
+                JOIN account_activation_tokens a ON a.user_id=u.id
+                WHERE (u.email=:email OR i.identifier=:identifier)
+                  AND u.is_active AND u.status='active'
+                  AND a.token_hash=:token_hash
+                  AND a.used_at IS NULL
+                  AND a.expires_at > now()
+                FOR UPDATE"""), {"email": email, "identifier": identifier, "token_hash": token_digest(activation_token)}).first()
+            if not row:
+                return JSONResponse(generic_auth_failure(), status_code=401)
+            connection.execute(text("""UPDATE app_users
+                SET password_hash=:password_hash, must_change_password=false,
+                    updated_at=now()
+                WHERE id=CAST(:id AS uuid)"""), {"password_hash": hash_password(new_password), "id": row[0]})
+            connection.execute(text("UPDATE account_activation_tokens SET used_at=now() WHERE user_id=CAST(:id AS uuid) AND used_at IS NULL"), {"id": row[0]})
+            connection.execute(text("UPDATE app_sessions SET revoked_at=now() WHERE user_id=CAST(:id AS uuid) AND revoked_at IS NULL"), {"id": row[0]})
+            raw_token, token_hash = new_session_token()
+            connection.execute(text("INSERT INTO app_sessions(token_hash,user_id,expires_at) VALUES(:token_hash,CAST(:id AS uuid),now()+interval '30 minutes')"), {"token_hash": token_hash, "id": row[0]})
+        response = JSONResponse({"status": "ok", "needs_totp_setup": True})
+        response.set_cookie("sofia_session", raw_token, httponly=True, samesite="lax", secure=os.getenv("SOFIA_COOKIE_SECURE", "0") == "1", max_age=30 * 60, path="/")
+        return response
+    except Exception:
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    finally:
+        engine.dispose()
+
+
+@mcp.custom_route("/auth/recover", methods=["POST"])
+async def auth_recover(request: Request) -> JSONResponse:
+    payload = await request.json()
+    client_key = request.client.host if request.client else "unknown"
+    if not login_limiter.allowed(client_key) or honeypot_triggered(payload):
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    recovery_token = str(payload.get("recovery_token", ""))
+    configured_token = os.getenv("SOFIA_RECOVERY_TOKEN") or os.getenv("SOFIA_SETUP_TOKEN")
+    login = str(payload.get("login") or payload.get("email") or payload.get("identifier") or "").strip()[:320]
+    new_password = str(payload.get("new_password", ""))
+    if not configured_token or recovery_token != configured_token or not validate_password(new_password) or not login:
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    email = login.lower() if "@" in login else ""
+    identifier = login.upper() if not email else ""
+    engine = database_engine()
+    if engine is None:
+        return JSONResponse(generic_auth_failure(), status_code=401)
+    try:
+        from sqlalchemy import text
+        new_totp_secret = pyotp.random_base32()
+        with engine.begin() as connection:
+            row = connection.execute(text("SELECT id::text FROM app_users u LEFT JOIN user_identifiers i ON i.user_id=u.id WHERE (u.email=:email OR i.identifier=:identifier) AND u.is_active AND u.status='active' FOR UPDATE"), {"email": email, "identifier": identifier}).first()
+            if not row:
+                return JSONResponse(generic_auth_failure(), status_code=401)
+            connection.execute(text("UPDATE app_users SET password_hash=:password_hash, must_change_password=true, updated_at=now() WHERE id=CAST(:id AS uuid)"), {"password_hash": hash_password(new_password), "id": row[0]})
+            connection.execute(text("UPDATE app_sessions SET revoked_at=now() WHERE user_id=CAST(:id AS uuid) AND revoked_at IS NULL"), {"id": row[0]})
+            connection.execute(text("INSERT INTO user_totp(user_id,secret_ciphertext,enabled_at) VALUES(CAST(:id AS uuid),:secret,NULL) ON CONFLICT(user_id) DO UPDATE SET secret_ciphertext=EXCLUDED.secret_ciphertext, enabled_at=NULL"), {"id": row[0], "secret": encrypt_totp_secret(new_totp_secret)})
+            raw_token, token_hash = new_session_token()
+            connection.execute(text("INSERT INTO app_sessions(token_hash,user_id,expires_at) VALUES(:token_hash,CAST(:id AS uuid),now()+interval '30 minutes')"), {"token_hash": token_hash, "id": row[0]})
+        response = JSONResponse({"status": "ok", "must_change_password": True})
+        response.set_cookie("sofia_session", raw_token, httponly=True, samesite="lax", secure=os.getenv("SOFIA_COOKIE_SECURE", "0") == "1", max_age=30 * 60, path="/")
         return response
     except Exception:
         return JSONResponse(generic_auth_failure(), status_code=401)
@@ -1155,6 +1249,59 @@ async def change_password(request: Request) -> JSONResponse:
         engine.dispose()
 
 
+@mcp.custom_route("/auth/totp/setup", methods=["GET"])
+async def totp_setup(request: Request) -> JSONResponse:
+    user_id = authenticated_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Autenticação necessária."}, status_code=401)
+    engine = database_engine()
+    try:
+        from sqlalchemy import text
+        with engine.connect() as connection:
+            row = connection.execute(text("SELECT u.email, u.must_change_password, t.secret_ciphertext, t.enabled_at FROM app_users u JOIN user_totp t ON t.user_id=u.id WHERE u.id=CAST(:id AS uuid) AND u.status='active'"), {"id": user_id}).first()
+        if not row or row[1]:
+            return JSONResponse({"error": "Troque a senha antes de configurar o autenticador."}, status_code=400)
+        secret = decrypt_totp_secret(row[2])
+        if row[3] is not None:
+            return JSONResponse({"enabled": True})
+        otp_uri = pyotp.TOTP(secret).provisioning_uri(name=row[0], issuer_name="Sofia")
+        import qrcode
+        qr_buffer = BytesIO()
+        qrcode.make(otp_uri).save(qr_buffer, format="PNG")
+        return JSONResponse({"enabled": False, "totp_secret": secret, "totp_uri": otp_uri, "qr_data_url": "data:image/png;base64," + base64.b64encode(qr_buffer.getvalue()).decode("ascii")})
+    except Exception:
+        return JSONResponse({"error": "Não foi possível preparar o autenticador."}, status_code=400)
+    finally:
+        engine.dispose()
+
+
+@mcp.custom_route("/auth/totp/enable", methods=["POST"])
+async def enable_totp(request: Request) -> JSONResponse:
+    user_id = authenticated_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Autenticação necessária."}, status_code=401)
+    payload = await request.json()
+    otp = str(payload.get("otp", ""))
+    engine = database_engine()
+    try:
+        from sqlalchemy import text
+        with engine.begin() as connection:
+            row = connection.execute(text("SELECT t.secret_ciphertext, t.enabled_at, u.must_change_password FROM user_totp t JOIN app_users u ON u.id=t.user_id WHERE t.user_id=CAST(:id AS uuid) AND u.status='active' FOR UPDATE"), {"id": user_id}).first()
+            if not row or row[2]:
+                return JSONResponse({"error": "Troque a senha antes de ativar o autenticador."}, status_code=400)
+            secret = decrypt_totp_secret(row[0])
+            if row[1] is not None:
+                return JSONResponse({"status": "ok", "enabled": True})
+            if not pyotp.TOTP(secret).verify(otp, valid_window=1):
+                return JSONResponse({"error": "Código inválido ou expirado."}, status_code=400)
+            connection.execute(text("UPDATE user_totp SET enabled_at=now() WHERE user_id=CAST(:id AS uuid)"), {"id": user_id})
+        return JSONResponse({"status": "ok", "enabled": True})
+    except Exception:
+        return JSONResponse({"error": "Não foi possível ativar o autenticador."}, status_code=400)
+    finally:
+        engine.dispose()
+
+
 @mcp.custom_route("/auth/users", methods=["GET", "POST"])
 async def auth_users(request: Request) -> JSONResponse:
     requester = authenticated_user(request)
@@ -1174,17 +1321,17 @@ async def auth_users(request: Request) -> JSONResponse:
         payload = await request.json()
         email = str(payload.get("email", "")).strip().lower()[:320]
         display_name = str(payload.get("display_name", "")).strip()[:120]
-        password = str(payload.get("password", ""))
         module_name = str(payload.get("module", "")).strip().lower()
-        if not email or not display_name or not validate_password(password) or module_name not in active_module_names() or module_name == "core":
+        if not email or not display_name or module_name not in active_module_names() or module_name == "core":
             return JSONResponse({"error": "Dados de usuário ou módulo inválidos."}, status_code=400)
+        name_parts = display_name.split(maxsplit=1)
+        first_name = name_parts[0][:80]
+        last_name = (name_parts[1] if len(name_parts) > 1 else "Usuário")[:80]
         with engine.begin() as connection:
-            new_user = connection.execute(text("""INSERT INTO app_users
-                (email, password_hash, display_name, role, status)
-                VALUES (:email, :password_hash, :display_name, 'module_user', 'pending')
-                RETURNING id::text"""), {"email": email, "password_hash": hash_password(password), "display_name": display_name}).scalar_one()
-            connection.execute(text("INSERT INTO user_module_access (user_id, module_name, approved_by) VALUES (CAST(:user_id AS uuid), :module_name, CAST(:approved_by AS uuid))"), {"user_id": new_user, "module_name": module_name, "approved_by": requester})
-        return JSONResponse({"status": "pending", "message": "Usuário criado e aguardando aprovação Global."}, status_code=201)
+            connection.execute(text("""INSERT INTO access_requests
+                (first_name,last_name,email,requested_module,justification,accepted_terms)
+                VALUES (:first_name,:last_name,:email,:module,'Criado pelo administrador CORE.',true)"""), {"first_name": first_name, "last_name": last_name, "email": email, "module": module_name})
+        return JSONResponse({"status": "pending", "message": "Solicitação criada. O usuário definirá a própria senha após a aprovação."}, status_code=201)
     except Exception:
         return JSONResponse({"error": "Não foi possível processar o usuário."}, status_code=400)
     finally:
@@ -1203,7 +1350,14 @@ async def list_access_requests(request: Request) -> JSONResponse:
             rows = connection.execute(text("""SELECT id::text, first_name, last_name, email,
                 requested_module, justification, status, decision_reason, created_at
                 FROM access_requests ORDER BY created_at DESC LIMIT 200""")).mappings().all()
-        return JSONResponse({"requests": [dict(row) for row in rows]})
+        serialized = []
+        for row in rows:
+            item = dict(row)
+            for key, value in item.items():
+                if hasattr(value, "isoformat"):
+                    item[key] = value.isoformat()
+            serialized.append(item)
+        return JSONResponse({"requests": serialized})
     finally:
         engine.dispose()
 
@@ -1223,9 +1377,9 @@ async def decide_access_request(request: Request) -> JSONResponse:
     module_role = str(payload.get("module_role", "operator")).casefold()
     if module_role not in {"operator", "manager", "global"}:
         return JSONResponse({"error": "Função inválida."}, status_code=400)
-    temporary_password = str(payload.get("temporary_password", ""))
-    if decision == "approved" and not validate_password(temporary_password):
-        return JSONResponse({"error": "Defina uma senha temporária válida para o primeiro acesso."}, status_code=400)
+    # The administrator chooses only the module and role. The end user creates
+    # their own password during activation.
+    activation_token = secrets.token_urlsafe(32) if decision == "approved" else ""
     totp_secret = pyotp.random_base32() if decision == "approved" else ""
     engine = database_engine()
     try:
@@ -1240,7 +1394,10 @@ async def decide_access_request(request: Request) -> JSONResponse:
                 user_id = connection.execute(text("""INSERT INTO app_users (email,password_hash,display_name,first_name,last_name,role,status,must_change_password)
                     VALUES (:email,:password_hash,:display_name,:first_name,:last_name,:role,'active',true)
                     ON CONFLICT(email) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,role=EXCLUDED.role,status='active',is_active=true,must_change_password=true
-                    RETURNING id::text"""), {"email": item["email"], "password_hash": hash_password(temporary_password), "display_name": f'{item["first_name"]} {item["last_name"]}', "first_name": item["first_name"], "last_name": item["last_name"], "role": app_role}).scalar_one()
+                    RETURNING id::text"""), {"email": item["email"], "password_hash": hash_password("Aa1!" + secrets.token_urlsafe(24)), "display_name": f'{item["first_name"]} {item["last_name"]}', "first_name": item["first_name"], "last_name": item["last_name"], "role": app_role}).scalar_one()
+                connection.execute(text("""INSERT INTO account_activation_tokens(user_id,token_hash,expires_at,used_at)
+                    VALUES(CAST(:user_id AS uuid),:token_hash,now()+(:activation_minutes * interval '1 minute'),NULL)
+                    ON CONFLICT(user_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at,used_at=NULL"""), {"user_id": user_id, "token_hash": token_digest(activation_token), "activation_minutes": ACTIVATION_TOKEN_MINUTES})
                 role_code = "AG" if module_role == "global" else ("AM" if module_role == "manager" else "OP")
                 identifier = connection.execute(text("SELECT identifier FROM user_identifiers WHERE user_id=CAST(:user_id AS uuid)"), {"user_id": user_id}).scalar()
                 if not identifier:
@@ -1256,16 +1413,8 @@ async def decide_access_request(request: Request) -> JSONResponse:
         audit_event(requester, f"access_request_{decision}", request)
         response = {"status": decision}
         if decision == "approved":
-            totp_uri = pyotp.TOTP(totp_secret).provisioning_uri(name=item["email"], issuer_name="Sofia")
-            import qrcode
-
-            qr_buffer = BytesIO()
-            qrcode.make(totp_uri).save(qr_buffer, format="PNG")
-            qr_data_url = "data:image/png;base64," + base64.b64encode(qr_buffer.getvalue()).decode("ascii")
-            response.update({"identifier": identifier, "totp_secret": totp_secret, "totp_uri": totp_uri, "qr_data_url": qr_data_url})
+            response.update({"identifier": identifier, "activation_token": activation_token})
         return JSONResponse(response)
-    except ValueError:
-        return JSONResponse({"error": "Senha temporária inválida."}, status_code=400)
     finally:
         engine.dispose()
 
