@@ -38,6 +38,7 @@ def test_gestao_6d_retrieves_the_local_study(tmp_path, monkeypatch):
     module_root = knowledge_root / "gestao-empresarial"
     module_root.mkdir(parents=True)
     (module_root / "IAGESTAOUNIVERSITARIA.txt").write_text("Modelo 6D para gestão universitária", encoding="utf-8")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr("server.KNOWLEDGE_BASE_PATH", knowledge_root)
     evidence = module_knowledge("gestao-empresarial", "Me diga algo sobre o modelo 6D")
     assert "IAGESTAOUNIVERSITARIA.txt" in evidence
