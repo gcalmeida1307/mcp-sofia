@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from "react";
 import { sofiaMcp } from "./mcpClient";
+import ModularChatView from "./features/chat/ChatView";
 
 async function requestJson(url: string, init: RequestInit, timeoutMs = 15000): Promise<{ response: Response; data: Record<string, any> }> {
   const controller = new AbortController();
@@ -230,7 +231,8 @@ function StatusBadge({ status }: { status: Module["status"] }) {
 
 // ── Chat view ─────────────────────────────────────────────────────────────
 
-function ChatView({ activeModule, onManageSources, userName }: { activeModule: ModuleId; onManageSources: () => void; userName: string }) {
+/** Legacy inline implementation retained temporarily for safe rollback; active chat lives in features/chat. */
+function LegacyChatView({ activeModule, onManageSources, userName }: { activeModule: ModuleId; onManageSources: () => void; userName: string }) {
   const cfg = moduleConfig(activeModule);
   const chatName = userName.trim().split(/\s+/)[0] || "Você";
   const [messages, setMessages] = useState<Message[]>([
@@ -1443,7 +1445,7 @@ export default function App() {
 
         {/* View content */}
         <div className="app-content flex-1 overflow-hidden">
-          {view === "chat" && <ChatView activeModule={activeModule} userName={userName} onManageSources={() => setView("modules")} key={activeModule} />}
+          {view === "chat" && <ModularChatView activeModule={activeModule} userName={userName} accent={accent} label={cfg.label} onManageSources={() => setView("modules")} key={activeModule} />}
           {view === "modules" && (
             <ModulesView
               modules={modules}
