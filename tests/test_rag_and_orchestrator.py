@@ -1,5 +1,5 @@
 from intelligence_orchestrator import plan_query
-from server import html_to_text, semantic_split_chunks
+from server import ask_claude_with_context, html_to_text, semantic_split_chunks
 
 
 def test_html_extraction_removes_navigation_and_deduplicates():
@@ -21,3 +21,8 @@ def test_orchestrator_escalates_high_risk_after_local_answer():
     assert plan.stream_local is True
     assert plan.verify_after is True
     assert plan.risk == "high"
+
+
+def test_claude_fallback_does_not_run_without_configured_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert ask_claude_with_context("medicina", "pergunta", "evidência") is None

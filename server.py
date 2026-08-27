@@ -4049,6 +4049,30 @@ def fast_chat_prompt(module_name: str, question: str, evidence: str, conversatio
     )
 
 
+def ask_claude_with_context(module_name: str, question: str, evidence: str, conversation_context: str = "", guidance: str = "", local_answer: str = "") -> str | None:
+    """Fallback-only Claude call; it never repeats retrieval or local generation."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not CLAUDE_FALLBACK_ENABLED or not api_key:
+        return None
+    prompt = fast_chat_prompt(module_name, question, evidence, conversation_context)
+    if guidance:
+        prompt += f"\n\nOrientação validada:\n{guidance[:4000]}"
+    if local_answer:
+        prompt += f"\n\nResposta local inconclusiva para revisar, não trate como fonte:\n{local_answer[:6000]}"
+    try:
+        client = Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
+            max_tokens=int(os.getenv("SOFIA_MAX_RESPONSE_TOKENS", "2400")),
+            system=prompt, messages=[{"role": "user", "content": question}],
+        )
+        answer = "\n".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+        return answer.strip() or None
+    except Exception as exc:
+        print(f"claude fallback unavailable: {type(exc).__name__}", flush=True)
+        return None
+
+
 @mcp.custom_route("/api/chat/stream", methods=["POST"])
 async def chat_stream(request: Request) -> StreamingResponse | JSONResponse:
     """Fast path: route, retrieve/cache in parallel, then stream local generation."""
@@ -4072,10 +4096,15 @@ async def chat_stream(request: Request) -> StreamingResponse | JSONResponse:
     if not has_module_permission(requester, module_name):
         return JSONResponse({"error": "Módulo sem permissão."}, status_code=403)
     query_plan = plan_query(module_name, question)
-    evidence, approved_cache, approved_guidance = await asyncio.gather(
-        asyncio.to_thread(module_knowledge, module_name, question),
-        asyncio.to_thread(cached_ai_answer, module_name, question),
-        asyncio.to_thread(approved_learning_guidance, module_name),
+    started = time.perf_counter()
+    async def timed_call(function: Any, *args: Any) -> tuple[Any, float]:
+        call_started = time.perf_counter()
+        result = await asyncio.to_thread(function, *args)
+        return result, round((time.perf_counter() - call_started) * 1000, 1)
+    (evidence, retrieval_ms), (approved_cache, cache_ms), (approved_guidance, guidance_ms) = await asyncio.gather(
+        timed_call(module_knowledge, module_name, question),
+        timed_call(cached_ai_answer, module_name, question),
+        timed_call(approved_learning_guidance, module_name),
     )
     if approved_cache:
         text_value = str(approved_cache)
@@ -4085,19 +4114,24 @@ async def chat_stream(request: Request) -> StreamingResponse | JSONResponse:
         prompt += f"\n\nOrientação validada:\n{approved_guidance[:4000]}"
 
     def events():
+        generation_started = time.perf_counter()
+        first_token_ms: float | None = None
         answer_parts: list[str] = []
         for token in stream_local_model(prompt, question):
+            if first_token_ms is None:
+                first_token_ms = round((time.perf_counter() - started) * 1000, 1)
             answer_parts.append(token)
             yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
         answer = "".join(answer_parts).strip()
         if answer and not local_answer_needs_fallback(answer, evidence):
             log_ai_query(module_name, question, answer, evidence, source_mode="local_rag_stream", model_name=LOCAL_AI_MODEL)
-            yield f"data: {json.dumps({'done': True, 'source_mode': 'local_rag_stream', 'risk': query_plan.risk}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'source_mode': 'local_rag_stream', 'risk': query_plan.risk, 'telemetry': {'routing_ms': round((time.perf_counter() - started) * 1000, 1) - retrieval_ms, 'retrieval_ms': retrieval_ms, 'cache_ms': cache_ms, 'first_token_ms': first_token_ms, 'generation_ms': round((time.perf_counter() - generation_started) * 1000, 1), 'fallback_ms': 0, 'total_ms': round((time.perf_counter() - started) * 1000, 1), 'provider': LOCAL_AI_MODEL, 'retrieved_chunks': len(_source_names(evidence)), 'context_chars': len(evidence)}} , ensure_ascii=False)}\n\n"
             return
         if query_plan.verify_after or requires_verification(question, confidence=0.5):
-            fallback = ask_claude(module_name, question, str(payload.get("context", "")))
+            fallback_started = time.perf_counter()
+            fallback = ask_claude_with_context(module_name, question, evidence, str(payload.get("context", "")), str(approved_guidance), answer)
             if fallback:
-                yield f"data: {json.dumps({'token': fallback, 'done': True, 'source_mode': 'selective_fallback'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'token': fallback, 'done': True, 'source_mode': 'selective_fallback', 'risk': query_plan.risk, 'telemetry': {'routing_ms': round((time.perf_counter() - started) * 1000, 1) - retrieval_ms, 'retrieval_ms': retrieval_ms, 'cache_ms': cache_ms, 'first_token_ms': first_token_ms, 'generation_ms': round((time.perf_counter() - generation_started) * 1000, 1), 'fallback_ms': round((time.perf_counter() - fallback_started) * 1000, 1), 'total_ms': round((time.perf_counter() - started) * 1000, 1), 'provider': 'claude', 'retrieved_chunks': len(_source_names(evidence)), 'context_chars': len(evidence)}} , ensure_ascii=False)}\n\n"
                 return
         fallback = answer or rag_only_answer(module_name, question, evidence)
         yield f"data: {json.dumps({'token': fallback, 'done': True, 'source_mode': 'rag_only'}, ensure_ascii=False)}\n\n"

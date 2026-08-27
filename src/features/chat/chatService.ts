@@ -1,4 +1,4 @@
-export type StreamEvent = { token?: string; done?: boolean; source_mode?: string; error?: string };
+export type StreamEvent = { token?: string; done?: boolean; source_mode?: string; error?: string; telemetry?: Record<string, number | string | null> };
 
 export async function* streamChat(module: string, question: string, context: string): AsyncGenerator<StreamEvent> {
   const response = await fetch("/api/chat/stream", {
