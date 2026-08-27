@@ -8,7 +8,9 @@ export default function ChatView({ activeModule, userName, accent, label, onMana
   const [status, setStatus] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, streaming]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streaming]);
   async function submit() { const text = input.trim(); if (!text || streaming) return; setInput(""); await send(text); }
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }
   async function upload(file: File) { setStatus(`Indexando ${file.name}...`); try { const data = await uploadChatAttachment(activeModule, file); setStatus(`${data.file ?? file.name} foi indexado no módulo ${label}.`); } catch (error) { setStatus(error instanceof Error ? error.message : "Falha no upload."); } finally { if (fileRef.current) fileRef.current.value = ""; } }

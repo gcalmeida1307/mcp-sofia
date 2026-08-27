@@ -1279,7 +1279,19 @@ export default function App() {
 
   useEffect(() => {
     if (authState !== "authenticated") return;
-    fetch("/auth/me", { credentials: "include" }).then((response) => response.ok ? response.json() : null).then(async (data) => { setUserRole(data?.user?.role ?? ""); setUserName(data?.user?.display_name ?? ""); const names = (data?.modules ?? []).map((item: { module_name: string }) => item.module_name === "infraestrutura" ? "infra" : item.module_name).filter((item: string) => item !== "core") as ModuleId[]; setAllowedModules(["core", ...names]); if (data?.user?.role !== "global" && names[0]) setActiveModule(names[0]); const moduleResponse = await fetch("/modules", { credentials: "include" }); if (moduleResponse.ok) { const moduleData = await moduleResponse.json(); setModules((moduleData.modules ?? []).map((item: any) => ({ id: item.slug === "infraestrutura" ? "infra" : item.slug, name: item.display_name, description: item.description, category: item.slug === "infraestrutura" ? "infra" : item.slug, status: item.is_active ? "active" : "maintenance", accentHex: item.accent_hex, icon: item.icon, createdAt: new Date(item.created_at) }))); } });
+    let cancelled = false;
+    async function loadSession() {
+      const response = await fetch("/auth/me", { credentials: "include" });
+      const data = response.ok ? await response.json() : null;
+      if (cancelled) return;
+      setUserRole(data?.user?.role ?? ""); setUserName(data?.user?.display_name ?? "");
+      const names = (data?.modules ?? []).map((item: { module_name: string }) => item.module_name === "infraestrutura" ? "infra" : item.module_name).filter((item: string) => item !== "core") as ModuleId[];
+      setAllowedModules(["core", ...names]); if (data?.user?.role !== "global" && names[0]) setActiveModule(names[0]);
+      const moduleResponse = await fetch("/modules", { credentials: "include" });
+      if (!cancelled && moduleResponse.ok) { const moduleData = await moduleResponse.json(); setModules((moduleData.modules ?? []).map((item: any) => ({ id: item.slug === "infraestrutura" ? "infra" : item.slug, name: item.display_name, description: item.description, category: item.slug === "infraestrutura" ? "infra" : item.slug, status: item.is_active ? "active" : "maintenance", accentHex: item.accent_hex, icon: item.icon, createdAt: new Date(item.created_at) }))); }
+    }
+    void loadSession();
+    return () => { cancelled = true; };
   }, [authState]);
 
   if (authState === "loading") return <div className="min-h-full flex items-center justify-center text-sm text-[var(--muted-foreground)]">Carregando autenticação...</div>;
