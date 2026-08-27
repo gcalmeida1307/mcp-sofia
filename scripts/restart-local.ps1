@@ -13,6 +13,11 @@ Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 
 $python = Join-Path $project ".venv\Scripts\python.exe"
+$pythonProbe = $null
+try { $pythonProbe = & $python --version 2>$null } catch { $pythonProbe = $null }
+if ($LASTEXITCODE -ne 0 -or -not $pythonProbe) {
+  $python = "C:\Program Files\PostgreSQL\18\pgAdmin 4\python\python.exe"
+}
 $vite = Join-Path $project "node_modules\.bin\vite.cmd"
 if (-not (Test-Path $python)) { throw "Python da venv não encontrado: $python" }
 if (-not (Test-Path $vite)) { throw "Vite não encontrado. Execute pnpm install primeiro." }

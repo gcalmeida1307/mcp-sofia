@@ -23,11 +23,31 @@ python server.py
 
 O servidor usa Streamable HTTP em `http://127.0.0.1:8000/mcp`.
 
+Após aplicar as migrações, o CORE também expõe `GET /core/manifest` (metadados
+governados dos módulos) e `POST /semantic/sql/validate` (validação de consultas
+somente leitura). O catálogo semântico de views e métricas é criado pela
+migração `016_semantic_catalog_and_governance.sql`; ele não libera tabelas
+brutas ao modelo.
+
 ## Configuração
 
 Edite `.env` e defina `ANTHROPIC_API_KEY` somente se quiser o fallback Claude. Nunca envie essa chave pelo chat ou a inclua no Git. O modelo local padrão é `qwen3.5:2b`, adequado a computadores mais simples. Em máquinas com mais memória, `qwen3.5:4b` melhora a qualidade; altere apenas `SOFIA_LOCAL_AI_MODEL`.
 
 O fluxo de resposta é: RAG isolado do módulo → Qwen local → Claude opcional quando a resposta local estiver indisponível ou inconclusiva. O Claude recebe os mesmos trechos recuperados da RAG. Respostas só viram memória reutilizável depois de feedback positivo e aprovação para o dataset; isso evita que uma resposta errada se autoalimente.
+
+### Enriquecimento semântico com Gemini
+
+O SDK oficial `google-genai` é opcional e já faz parte das dependências. O Gemini não é offline: quando habilitado, ele é chamado somente durante a indexação/reindexação para criar resumo, palavras-chave, conceitos, perguntas relacionadas e relações. Esse resultado é salvo em `knowledge_sources.schema_json` junto ao módulo e pode ser usado pela RAG local sem reenviar a fonte.
+
+No `.env.local`, configure a chave obtida no Google AI Studio — nunca no código — e habilite o recurso:
+
+```text
+GEMINI_API_KEY=sua_chave_local
+SOFIA_GEMINI_SEMANTICS_ENABLED=1
+SOFIA_GEMINI_MODEL=gemini-2.5-flash-lite
+```
+
+Se a chave não existir, a ingestão continua normalmente usando extração e semântica local. Para manter dados sensíveis totalmente offline, deixe `SOFIA_GEMINI_SEMANTICS_ENABLED=0`.
 
 ## Atualizar uma instalação existente
 

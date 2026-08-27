@@ -292,7 +292,7 @@ function ChatView({ activeModule, onManageSources, userName }: { activeModule: M
         {
           id: (Date.now() + 1).toString(),
           role: "sofia",
-          content: `Não consegui acessar o MCP Sofia. Verifique se o servidor está ativo em http://127.0.0.1:8000.\n\nDetalhe: ${detail}`,
+          content: `Não consegui acessar o MCP Sofia. Verifique se a API está ativa e se a origem do navegador está autorizada.\n\nDetalhe: ${detail}`,
           ts: new Date(),
         },
       ]);
@@ -905,21 +905,21 @@ function AuthView({ setup, recoveryEnabled, theme, onThemeChange, onAuthenticate
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, login: login || email, matricula: login || email, identifier: login || email, password, otp, setup_token: setupToken, website: "" }),
+        body: JSON.stringify({ email, login: login || email, matricula: login || email, identifier: login || email, password, setup_token: setupToken, website: "" }),
       });
       const data = await response.json();
       if (!response.ok) {
-        if (data.code === "OTP_REQUIRED") setRequiresOtp(true);
         throw new Error(data.error ?? "Não foi possível concluir a autenticação.");
       }
       if (isSetup) {
+        if (!data.totp_required) { onAuthenticated(false, false); return; }
         setTotpSecret(data.totp_secret ?? "");
         setLogin(data.identifier ?? "");
         setQrDataUrl(data.qr_data_url ?? "");
         setRecoveryCodes(data.recovery_codes ?? []);
         setSetupComplete(true);
-        setError("Usuário Global criado. Cadastre o segredo no seu aplicativo autenticador e entre com o código de seis dígitos.");
-      } else onAuthenticated(Boolean(data.must_change_password));
+        setError("Usuário Global criado. Você já pode entrar com e-mail ou matrícula e senha.");
+      } else onAuthenticated(Boolean(data.must_change_password), Boolean(data.needs_totp_setup));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível concluir a autenticação.");
     } finally {

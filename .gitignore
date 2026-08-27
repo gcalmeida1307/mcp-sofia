@@ -6,6 +6,7 @@ build/
 !.env.example
 .venv/
 .runtime-site/
+.runtime-site*/
 __pycache__/
 .pytest_cache/
 sofia_mcp.egg-info/
@@ -22,6 +23,7 @@ vite.config.*.timestamp-*
 *-debug.log*
 logs/
 *.log
+frontend-*.txt
 .claude-replay.*
 .tmp-*
 
