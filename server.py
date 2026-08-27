@@ -357,6 +357,9 @@ def clean_retrieved_text(value: str) -> str:
     noise_markers = ("menu navegação", "barra topo", "social e acessibilidade", "latest news", "quick links", "privacy legal notice", "select language")
     if sum(text_value.casefold().count(marker) for marker in noise_markers) >= 2:
         return ""
+    boilerplate_markers = ("pagina inicial", "pÃ¡gina inicial", "collections", "select language", "portuguÃªs", "english", "espaÃ±ol")
+    if sum(text_value.casefold().count(marker) for marker in boilerplate_markers) >= 4:
+        return ""
     text_value = re.sub(r"\s{2,}", " ", text_value).strip()
     return text_value
 
@@ -372,13 +375,13 @@ def retrieval_quality(question: str, text_value: str) -> float:
     return min(1.0, overlap / max(3.0, min(8.0, len(terms))))
 
 
-def retrieval_quality_gate(question: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def retrieval_quality_gate(question: str, rows: list[dict[str, Any]], module_name: str = "juridico-trabalhista") -> list[dict[str, Any]]:
     """Reject plausible-looking documents that do not answer the question."""
-    expanded = expanded_question("juridico-trabalhista", question).casefold()
+    expanded = expanded_question(module_name, question).casefold()
     terms = {term for term in re.findall(r"[^\W_]{4,}", expanded, flags=re.UNICODE)
              if term not in {"para", "como", "sobre", "qual", "quais", "esse", "essa", "dias"}}
     concepts = ("descanso semanal", "repouso semanal", "24 horas consecutivas",
-                "folga semanal", "lei 605", "descanso remunerado")
+                "folga semanal", "lei 605", "descanso remunerado") if module_name == "juridico-trabalhista" else ()
     accepted: list[dict[str, Any]] = []
     for row in rows:
         cleaned = clean_retrieved_text(str(row.get("chunk_text") or ""))
@@ -611,12 +614,12 @@ def module_knowledge(module_name: str, question: str = "") -> str:
                 rows = rerank_text_candidates(search_question, [dict(row) for row in rows], limit=RAG_TOP_K)
                 if question.strip():
                     rows = [row for row in rows if float(row.get("rank") or 0) >= RAG_MIN_SCORE]
-                    rows = retrieval_quality_gate(question, rows)
+                    rows = retrieval_quality_gate(question, rows, module_name)
                 if not rows:
                     semantic_rows = semantic_search_rows(connection, module_name, search_question, limit=RAG_TOP_K)
                     rows = rerank_text_candidates(search_question, semantic_rows, limit=RAG_TOP_K)
                     rows = [row for row in rows if float(row.get("rank") or 0) >= RAG_MIN_SCORE]
-                    rows = retrieval_quality_gate(question, rows)
+                    rows = retrieval_quality_gate(question, rows, module_name)
                 diagnostic_candidates = [{"source": str(row.get("original_name", "")), "url": row.get("source_url"), "rank": float(row.get("rank") or 0)} for row in rows]
             engine.dispose()
             for row in rows:

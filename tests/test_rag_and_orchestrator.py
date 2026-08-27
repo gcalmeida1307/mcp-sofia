@@ -12,6 +12,11 @@ def test_html_extraction_removes_navigation_and_deduplicates():
     assert text.count("Febre e tosse.") == 1
 
 
+def test_web_boilerplate_is_rejected_across_modules():
+    noisy = "Pagina inicial Home Collections Select language Português English Español"
+    assert clean_retrieved_text(noisy) == ""
+
+
 def test_semantic_chunks_are_bounded_and_unique():
     chunks = semantic_split_chunks("## Sintomas\nFebre e tosse.\n\n## Tratamento\nRepouso e hidratação.")
     assert len(chunks) == 2
