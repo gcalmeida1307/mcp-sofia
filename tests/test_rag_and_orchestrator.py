@@ -1,5 +1,5 @@
 from intelligence_orchestrator import plan_query
-from server import ask_claude_with_context, html_to_text, semantic_split_chunks
+from server import ask_claude_with_context, clean_retrieved_text, html_to_text, module_info, semantic_split_chunks
 
 
 def test_html_extraction_removes_navigation_and_deduplicates():
@@ -26,3 +26,9 @@ def test_orchestrator_escalates_high_risk_after_local_answer():
 def test_claude_fallback_does_not_run_without_configured_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert ask_claude_with_context("medicina", "pergunta", "evidência") is None
+
+
+def test_existing_navigation_chunk_is_rejected_and_legal_module_is_broad():
+    noisy = "TST Ir para o conteúdo principal Barra Topo Menu Navegação Social e Acessibilidade Latest news"
+    assert clean_retrieved_text(noisy) == ""
+    assert module_info("juridico-trabalhista")["title"] == "Direito"

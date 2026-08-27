@@ -111,7 +111,7 @@ const MODULE_CONFIGS: Record<string, ModuleConfig> = {
   "recursos-humanos": { label: "RECURSOS HUMANOS", icon: "●", accent: "#E05D44", accentDark: "#B74431", accentLight: "#FCE8E4", accentText: "#8F2D21", tag: "bg-rose-100 text-rose-700" },
   contabilidade: { label: "CONTABILIDADE", icon: "▣", accent: "#546E7A", accentDark: "#37474F", accentLight: "#ECEFF1", accentText: "#37474F", tag: "bg-slate-100 text-slate-700" },
   financeiro: { label: "FINANCEIRO", icon: "¤", accent: "#B8860B", accentDark: "#8B6508", accentLight: "#FFF8E1", accentText: "#6D4C00", tag: "bg-amber-100 text-amber-800" },
-  "juridico-trabalhista": { label: "JURÍDICO TRABALHISTA", icon: "§", accent: "#7B1E3A", accentDark: "#541329", accentLight: "#F7E7ED", accentText: "#541329", tag: "bg-rose-100 text-rose-800" },
+  "juridico-trabalhista": { label: "DIREITO", icon: "§", accent: "#7B1E3A", accentDark: "#541329", accentLight: "#F7E7ED", accentText: "#541329", tag: "bg-rose-100 text-rose-800" },
   secretaria: { label: "SECRETARIA", icon: "◇", accent: "#00838F", accentDark: "#005662", accentLight: "#E0F7FA", accentText: "#005662", tag: "bg-cyan-100 text-cyan-800" },
   cursos: { label: "CURSOS", icon: "✦", accent: "#6F42C1", accentDark: "#512DA8", accentLight: "#EDE7F6", accentText: "#4527A0", tag: "bg-violet-100 text-violet-800" },
   biblioteca: { label: "BIBLIOTECA", icon: "▤", accent: "#795548", accentDark: "#4E342E", accentLight: "#EFEBE9", accentText: "#4E342E", tag: "bg-stone-100 text-stone-800" },

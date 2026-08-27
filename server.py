@@ -167,7 +167,7 @@ MODULES: dict[str, dict[str, str]] = {
     "recursos-humanos": {"title": "Recursos Humanos", "description": "Pessoas, admissões, benefícios, desenvolvimento, ponto e políticas internas."},
     "contabilidade": {"title": "Contabilidade", "description": "Registros contábeis, demonstrações, conciliação e obrigações."},
     "financeiro": {"title": "Financeiro", "description": "Orçamento, contas, pagamentos, recebimentos e planejamento financeiro."},
-    "juridico-trabalhista": {"title": "Jurídico", "description": "Direito do trabalho, tributário, constitucional, civil, administrativo, contratos, LGPD e jurisprudência, conforme as fontes autorizadas do módulo."},
+    "juridico-trabalhista": {"title": "Direito", "description": "Direito do trabalho, tributário, constitucional, civil, administrativo, contratos, LGPD, consumidor e jurisprudência, conforme as fontes autorizadas do módulo."},
     "secretaria": {"title": "Secretaria", "description": "Atendimento acadêmico, documentos, protocolos e comunicação institucional."},
     "cursos": {"title": "Cursos", "description": "Cursos, disciplinas, ementas, calendários, turmas e materiais didáticos."},
     "biblioteca": {"title": "Biblioteca", "description": "Acervo, catalogação, empréstimos, referências e pesquisa acadêmica."},
@@ -256,6 +256,13 @@ MEDICAL_SYNONYMS = {
 }
 LEGAL_CONTEXT = {
     "recurso": ("CLT", "processo do trabalho", "recurso ordinário", "Tribunal Regional do Trabalho"),
+    "civil": ("direito civil", "contratos", "obrigações", "responsabilidade civil"),
+    "constitucional": ("direito constitucional", "constituição federal", "direitos fundamentais"),
+    "administrativo": ("direito administrativo", "administração pública", "licitação", "contrato administrativo"),
+    "tributário": ("direito tributário", "imposto", "tributo", "obrigação tributária"),
+    "tributario": ("direito tributário", "imposto", "tributo", "obrigação tributária"),
+    "consumidor": ("direito do consumidor", "relação de consumo", "fornecedor", "cdc"),
+    "lgpd": ("proteção de dados", "dados pessoais", "controlador", "operador"),
     "prazo": ("CLT", "processo trabalhista", "dias", "recurso"),
     "abandono": ("CLT", "abandono de emprego", "justa causa", "empregado"),
     "hora extra": ("CLT", "jornada de trabalho", "horas suplementares", "art. 59"),
@@ -340,6 +347,17 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     return sum(a * b for a, b in zip(left, right)) / max(math.sqrt(sum(a * a for a in left)) * math.sqrt(sum(b * b for b in right)), 1e-12)
 
 
+def clean_retrieved_text(value: str) -> str:
+    """Remove common web chrome that may already exist in older indexes."""
+    text_value = re.sub(r"\s+", " ", str(value or "")).strip()
+    text_value = re.sub(r"(?:skip to|ir para) (?:main content|conteúdo(?: principal)?|o conteúdo|o menu|o rodapé)", " ", text_value, flags=re.IGNORECASE)
+    noise_markers = ("menu navegação", "barra topo", "social e acessibilidade", "latest news", "quick links", "privacy legal notice", "select language")
+    if sum(text_value.casefold().count(marker) for marker in noise_markers) >= 2:
+        return ""
+    text_value = re.sub(r"\s{2,}", " ", text_value).strip()
+    return text_value
+
+
 def rerank_text_candidates(question: str, rows: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
     """Apply a deterministic, module-local lexical rerank after retrieval.
 
@@ -352,7 +370,11 @@ def rerank_text_candidates(question: str, rows: list[dict[str, Any]], limit: int
     terms -= stopwords
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in rows:
-        text_value = str(row.get("chunk_text") or "").casefold()
+        cleaned = clean_retrieved_text(str(row.get("chunk_text") or ""))
+        if not cleaned:
+            continue
+        row["chunk_text"] = cleaned
+        text_value = cleaned.casefold()
         overlap = sum(1 for term in terms if term in text_value)
         base = float(row.get("rank") or 0)
         scored.append((base + overlap * 0.25, row))
@@ -586,6 +608,9 @@ def module_knowledge(module_name: str, question: str = "") -> str:
                 try:
                     content = path.read_text(encoding="utf-8", errors="ignore")[:12000]
                 except OSError:
+                    continue
+                content = clean_retrieved_text(content)
+                if not content:
                     continue
                 haystack = f"{path.name} {content}".casefold()
                 overlap = sum(1 for term in query_terms if term in haystack)
@@ -832,6 +857,8 @@ def choose_module(question: str) -> str | None:
         "recursos-humanos": ("rh", "recursos humanos", "folha", "admissão", "admissao", "demissão", "demissao", "benefício", "beneficio", "ponto", "recrutamento"),
     }
     active = set(active_module_names())
+    if "juridico-trabalhista" in active and any(term in q for term in ("direito", "civil", "constitucional", "administrativo", "tributário", "tributario", "consumidor", "lgpd", "dados pessoais", "contratos")):
+        return "juridico-trabalhista"
     for module_name, keywords in terms.items():
         if module_name in active and any(term in q for term in keywords):
             return module_name
