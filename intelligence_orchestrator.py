@@ -18,6 +18,6 @@ def plan_query(module: str, question: str, *, write: bool = False) -> QueryPlan:
     risk = "normal"
     if write or any(term in value for term in ("criar", "alterar", "excluir", "aprovar", "enviar")):
         risk = "critical"
-    elif any(term in value for term in ("medic", "diagnóst", "diagnost", "juríd", "jurid", "contrato", "finance", "pagamento")):
+    elif any(term in value for term in ("medic", "diagnóst", "diagnost", "juríd", "jurid", "contrato", "finance", "pagamento", "urgente", "urgência", "atendimento imediato")):
         risk = "high"
     return QueryPlan(module=module, risk=risk, verify_after=risk in {"high", "critical"})

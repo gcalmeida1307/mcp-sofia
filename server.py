@@ -2398,6 +2398,10 @@ def semantic_split_chunks(text_value: str, size: int = 1800, overlap: int = 180)
     chunks: list[str] = []
     current = ""
     for block in blocks:
+        starts_heading = bool(re.match(r"^#{1,6}\s", block))
+        if current and starts_heading:
+            chunks.append(current)
+            current = ""
         if len(current) + len(block) + 1 <= size:
             current = f"{current} {block}".strip()
         else:
