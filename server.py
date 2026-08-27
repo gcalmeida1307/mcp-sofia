@@ -100,7 +100,7 @@ except ValueError:
 MAX_LINKED_DOCUMENTS = int(os.getenv("SOFIA_MAX_LINKED_DOCUMENTS", "20"))
 MAX_INPUT_CHARS = int(os.getenv("SOFIA_MAX_INPUT_CHARS", "12000"))
 RAG_TOP_K = max(1, min(8, int(os.getenv("SOFIA_RAG_TOP_K", "4"))))
-RAG_MIN_SCORE = max(0.0, min(1.0, float(os.getenv("SOFIA_RAG_MIN_SCORE", "0.12"))))
+RAG_MIN_SCORE = max(0.0, min(1.0, float(os.getenv("SOFIA_RAG_MIN_SCORE", "0.35"))))
 RAG_MAX_CONTEXT_CHARS = max(2000, min(30000, int(os.getenv("SOFIA_RAG_MAX_CONTEXT_CHARS", "12000"))))
 TOTP_ENABLED = os.getenv("SOFIA_TOTP_ENABLED", "0") == "1"
 EMBEDDINGS_ENABLED = os.getenv("SOFIA_EMBEDDINGS_ENABLED", "0") == "1"
@@ -255,6 +255,9 @@ MEDICAL_SYNONYMS = {
     "rinite alérgica": ("coriza", "rinorreia", "secreção nasal"),
 }
 LEGAL_CONTEXT = {
+    "dias consecutivos": ("descanso semanal remunerado", "repouso semanal", "DSR", "24 horas consecutivas", "folga semanal", "Lei 605/49", "CLT"),
+    "7 dias": ("descanso semanal remunerado", "repouso semanal", "DSR", "24 horas consecutivas", "folga semanal", "Lei 605/49", "CLT"),
+    "trabalhar 7 dias": ("descanso semanal remunerado", "repouso semanal", "DSR", "24 horas consecutivas", "folga semanal", "Lei 605/49", "CLT"),
     "recurso": ("CLT", "processo do trabalho", "recurso ordinário", "Tribunal Regional do Trabalho"),
     "civil": ("direito civil", "contratos", "obrigações", "responsabilidade civil"),
     "constitucional": ("direito constitucional", "constituição federal", "direitos fundamentais"),
@@ -358,6 +361,38 @@ def clean_retrieved_text(value: str) -> str:
     return text_value
 
 
+def retrieval_quality(question: str, text_value: str) -> float:
+    """Estimate whether a chunk addresses the question, independent of DB rank."""
+    expanded = expanded_question("juridico-trabalhista", question).casefold()
+    terms = {term for term in re.findall(r"[a-zÀ-ÿ0-9]{4,}", expanded) if term not in {"para", "como", "sobre", "qual", "quais", "esse", "essa", "dias"}}
+    if not terms:
+        return 0.0
+    haystack = clean_retrieved_text(text_value).casefold()
+    overlap = sum(1 for term in terms if term in haystack)
+    return min(1.0, overlap / max(3.0, min(8.0, len(terms))))
+
+
+def retrieval_quality_gate(question: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Reject plausible-looking documents that do not answer the question."""
+    expanded = expanded_question("juridico-trabalhista", question).casefold()
+    terms = {term for term in re.findall(r"[^\W_]{4,}", expanded, flags=re.UNICODE)
+             if term not in {"para", "como", "sobre", "qual", "quais", "esse", "essa", "dias"}}
+    concepts = ("descanso semanal", "repouso semanal", "24 horas consecutivas",
+                "folga semanal", "lei 605", "descanso remunerado")
+    accepted: list[dict[str, Any]] = []
+    for row in rows:
+        cleaned = clean_retrieved_text(str(row.get("chunk_text") or ""))
+        if not cleaned:
+            continue
+        haystack = cleaned.casefold()
+        overlap = sum(1 for term in terms if term in haystack)
+        concept_hit = any(concept in haystack for concept in concepts)
+        if overlap >= 2 or concept_hit:
+            row["chunk_text"] = cleaned
+            accepted.append(row)
+    return accepted
+
+
 def rerank_text_candidates(question: str, rows: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
     """Apply a deterministic, module-local lexical rerank after retrieval.
 
@@ -377,7 +412,11 @@ def rerank_text_candidates(question: str, rows: list[dict[str, Any]], limit: int
         text_value = cleaned.casefold()
         overlap = sum(1 for term in terms if term in text_value)
         base = float(row.get("rank") or 0)
-        scored.append((base + overlap * 0.25, row))
+        lexical_score = overlap / max(1.0, len(terms))
+        rank_signal = min(max(base, 0.0), 1.0) * 0.15
+        quality = max(lexical_score, retrieval_quality(question, cleaned))
+        row["rank"] = round(min(1.0, quality * 0.85 + rank_signal), 4)
+        scored.append((float(row["rank"]), row))
     scored.sort(key=lambda item: item[0], reverse=True)
     return [row for _, row in scored[:limit]]
 
@@ -572,8 +611,12 @@ def module_knowledge(module_name: str, question: str = "") -> str:
                 rows = rerank_text_candidates(search_question, [dict(row) for row in rows], limit=RAG_TOP_K)
                 if question.strip():
                     rows = [row for row in rows if float(row.get("rank") or 0) >= RAG_MIN_SCORE]
+                    rows = retrieval_quality_gate(question, rows)
                 if not rows:
-                    rows = semantic_search_rows(connection, module_name, search_question, limit=12)
+                    semantic_rows = semantic_search_rows(connection, module_name, search_question, limit=RAG_TOP_K)
+                    rows = rerank_text_candidates(search_question, semantic_rows, limit=RAG_TOP_K)
+                    rows = [row for row in rows if float(row.get("rank") or 0) >= RAG_MIN_SCORE]
+                    rows = retrieval_quality_gate(question, rows)
                 diagnostic_candidates = [{"source": str(row.get("original_name", "")), "url": row.get("source_url"), "rank": float(row.get("rank") or 0)} for row in rows]
             engine.dispose()
             for row in rows:
@@ -619,7 +662,7 @@ def module_knowledge(module_name: str, question: str = "") -> str:
                     candidates.append((float(overlap * 10 + exact_phrase), path, content))
         candidates.sort(key=lambda item: (item[0], item[1].name.casefold()), reverse=True)
         for score, path, content in candidates[:RAG_TOP_K]:
-            if question.strip() and score < max(1.0, RAG_MIN_SCORE * 10):
+            if question.strip() and module_name == "juridico-trabalhista" and retrieval_quality(question, content) < RAG_MIN_SCORE:
                 continue
             chunks.append(f"[Fonte: {path.name} · módulo {module_name}]\n{content[:3500]}")
     evidence = "\n\n".join(chunks)[:RAG_MAX_CONTEXT_CHARS] or "NENHUMA_FONTE_RECUPERADA: não há evidência indexada para esta pergunta."
@@ -4264,6 +4307,9 @@ def rag_only_answer(module_name: str, question: str, evidence: str) -> str:
             "ou piora importante. Esta é uma explicação geral e não substitui uma avaliação médica."
         )
         return answer + source_note
+
+    return (f"Ha documentos no modulo {title}, mas nenhum trecho passou pelo filtro de relevancia para responder a pergunta. "
+            "Reindexe uma fonte normativa especifica; nao vou usar capa ou expediente como resposta.")
 
     excerpts = [part.strip() for part in evidence.split("\n\n") if part.strip()]
     excerpt = re.sub(r"\[Fonte:[^\]]+\]\s*", "", excerpts[0] if excerpts else "")
