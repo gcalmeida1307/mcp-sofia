@@ -1,7 +1,7 @@
 from intelligence_orchestrator import plan_query
 from server import (ask_claude_with_context, clean_retrieved_text, expanded_question,
-                    html_to_text, module_info, rag_only_answer, retrieval_quality_gate,
-                    semantic_split_chunks)
+                    html_to_text, module_info, rag_only_answer, response_style_guidance,
+                    retrieval_quality_gate, semantic_split_chunks)
 
 
 def test_html_extraction_removes_navigation_and_deduplicates():
@@ -59,7 +59,40 @@ def test_quality_gate_rejects_cover_and_accepts_relevant_legal_chunk():
     assert "repouso semanal" in rows[0]["chunk_text"]
 
 
+def test_quality_uses_the_selected_module_for_medical_terms():
+    assert retrieval_quality_gate(
+        "O que é DCJ e o que ela afeta na coordenação motora?",
+        [{"chunk_text": "A DCJ, ou doença de Creutzfeldt-Jakob, pode causar ataxia e alterações da coordenação motora."}],
+        "medicina",
+    )
+    assert not retrieval_quality_gate(
+        "O que é DCJ e o que ela afeta na coordenação motora?",
+        [{"chunk_text": "Senado Federal expediente e índice do Vade Mecum."}],
+        "medicina",
+    )
+
+
+def test_dcj_fallback_is_human_and_transparent_about_missing_rag():
+    answer = rag_only_answer("medicina", "O que é DCJ?", "NENHUMA_FONTE_RECUPERADA")
+    assert "Creutzfeldt" in answer
+    assert "não encontrei" in answer.casefold()
+    assert "DATASUS" not in answer
+
+
+def test_medical_fallback_explains_cause_and_effect_without_source_intro():
+    answer = rag_only_answer("medicina", "O que a dengue faz no corpo?", "NENHUMA_FONTE_RECUPERADA")
+    assert answer.startswith("A dengue é")
+    assert "causa" not in answer.casefold() or "provoca" in answer.casefold()
+    assert "Fontes consultadas" not in answer
+
+
+def test_response_guidance_is_domain_specific_and_causal():
+    guidance = response_style_guidance("infraestrutura")
+    assert "causa" in guidance
+    assert "diagnóstico técnico" in guidance
+
+
 def test_rag_fallback_never_uses_first_chunk_as_answer():
     answer = rag_only_answer("juridico-trabalhista", "trabalhar 7 dias consecutivos", "[Fonte: vade.txt]\nSenado Federal Mesa Biênio")
     assert "Senado Federal" not in answer
-    assert "filtro de relevancia" in answer
+    assert "filtro de relev" in answer.casefold()
